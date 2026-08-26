@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Company, Stage, InteractionLog } from '../types';
-import { initialCompanies } from '../data';
 import { v4 as uuidv4 } from 'uuid';
 
 export function useCompanies(user: any) {
@@ -20,20 +19,12 @@ export function useCompanies(user: any) {
     const unsubscribe = onSnapshot(
       collection(db, 'companies'),
       async (snapshot) => {
-        if (snapshot.empty) {
-          // Seed companies
-          for (const c of initialCompanies) {
-            const cleanC = Object.fromEntries(
-              Object.entries(c).filter(([_, v]) => v !== undefined)
-            );
-            try {
-              await setDoc(doc(db, 'companies', c.id), cleanC);
-            } catch (err) {
-              handleFirestoreError(err, OperationType.CREATE, 'companies');
-            }
-          }
-          setCompanies(initialCompanies);
-        } else {
+        // NOTE: this listener used to seed the database from `initialCompanies`
+        // whenever the collection came back empty. That was a prototyping
+        // convenience and a live hazard: any momentary empty result would
+        // write demo companies into production. Removed deliberately.
+        // An empty collection now simply renders an empty pipeline.
+        {
           let fetchedCompanies: Company[] = [];
           snapshot.forEach((d) => {
             const data = d.data() as Company;

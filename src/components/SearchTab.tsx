@@ -55,19 +55,27 @@ export function SearchTab({ companies = [] }: { companies?: Company[] }) {
     setIsLoading(true);
 
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      
+      // Send only the fields the server passes to the model. Uploading whole
+      // company records (interactions, deal terms, attachments) on every
+      // question wasted bandwidth and grew with the pipeline.
+      const companySummaries = companies.map(c => ({
+        name: c.name,
+        stage: c.stage,
+        vertical: c.vertical,
+        location: c.location,
+        fund: c.fund,
+        basics: c.basics,
+      }));
+
+      // apiFetch attaches the Authorization header itself.
       const response = await apiFetch('/api/search-chat', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           query: userMessage.content,
           userId: user?.uid,
           userEmail: user?.email,
-          localCompanies: companies
+          localCompanies: companySummaries
         }),
       });
 

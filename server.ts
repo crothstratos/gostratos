@@ -409,6 +409,34 @@ Extract the following information and return it strictly as a JSON object matchi
     try {
       const { query, localCompanies = [] } = req.body;
       const ai = getGeminiAI();
+
+      // Cap what reaches the model. Sending the whole pipeline works today
+      // but will eventually exceed the context window and costs tokens on
+      // every question. Over the cap, keep the companies whose text matches
+      // the query, then fill the remainder with the rest.
+      const MAX_COMPANIES = 250;
+      let scopedCompanies = localCompanies;
+      let wasTruncated = false;
+
+      if (localCompanies.length > MAX_COMPANIES) {
+        const terms = String(query || "")
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((t) => t.length > 2);
+
+        const matches = (c) => {
+          const hay = JSON.stringify(c).toLowerCase();
+          return terms.some((t) => hay.includes(t));
+        };
+
+        const relevant = localCompanies.filter(matches);
+        const rest = localCompanies.filter((c) => !matches(c));
+        scopedCompanies = [...relevant, ...rest].slice(0, MAX_COMPANIES);
+        wasTruncated = true;
+        console.log(
+          `search-chat: ${localCompanies.length} companies reduced to ${scopedCompanies.length} (${relevant.length} keyword matches)`
+        );
+      }
       const finalPrompt = `
 You are an expert Venture Capital Analyst and Data Assistant for a Venture Capital firm.
 Your job is to help the VC team evaluate, source, and learn more about startups in our internal database.
@@ -416,9 +444,9 @@ The user (a VC associate or partner) asked: "${query}"
 
 Here is the local CRM Web App Data from the active session (companies currently tracked on the kanban boards):
 ${
-  localCompanies.length > 0
+  scopedCompanies.length > 0
     ? JSON.stringify(
-        localCompanies.map((c) => ({
+        scopedCompanies.map((c) => ({
           name: c.name,
           stage: c.stage,
           vertical: c.vertical,
@@ -430,6 +458,11 @@ ${
         2
       )
     : "No local CRM companies available or none tracked."
+}
+${
+  wasTruncated
+    ? `\nNOTE: the firm tracks ${localCompanies.length} companies; only the ${scopedCompanies.length} most relevant to this question are shown. Say so if the answer might be incomplete.`
+    : ""
 }
 
 Instructions:
