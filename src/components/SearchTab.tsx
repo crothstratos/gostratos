@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -56,7 +57,7 @@ export function SearchTab({ companies = [] }: { companies?: Company[] }) {
     try {
       const idToken = await auth.currentUser?.getIdToken();
       
-      const response = await fetch('/api/search-chat', {
+      const response = await apiFetch('/api/search-chat', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

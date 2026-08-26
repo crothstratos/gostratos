@@ -1,6 +1,7 @@
+import { apiFetch } from './api';
 export const analyzeCompany = async (input: string, type: 'url' | 'raw' | 'deck') => {
   try {
-    const response = await fetch('/api/analyze', {
+    const response = await apiFetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ input, type }),

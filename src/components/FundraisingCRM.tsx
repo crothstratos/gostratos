@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { InvestorProfile, FUNDRAISING_STAGES, FundraisingStage, InteractionLog, INVESTOR_TYPES } from '../types';
 import { cn, formatLocation, getInvestorTypeColorClass } from '../utils';
@@ -577,7 +578,7 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
     if (!newActivity.notes || !selectedInvestor) return;
     setIsAnalyzingEmail(true);
     try {
-      const response = await fetch('/api/analyze-email', {
+      const response = await apiFetch('/api/analyze-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -619,7 +620,7 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
     setIsGeneratingDescription(true);
 
     try {
-      const response = await fetch('/api/describe', {
+      const response = await apiFetch('/api/describe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newInvestor.firmName, website: newInvestor.website }),

@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useState, useEffect } from 'react';
 import { Mail, RefreshCw, AlertCircle, MessageSquare } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -108,7 +109,7 @@ export const CompanyConversations: React.FC<CompanyConversationsProps> = ({ foun
       }
 
       // Call our API to summarize
-      const summaryRes = await fetch('/api/summarize-conversations', {
+      const summaryRes = await apiFetch('/api/summarize-conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emails }),

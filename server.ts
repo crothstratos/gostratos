@@ -5,7 +5,8 @@ import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
 import { PDFParse } from "pdf-parse";
 import { parseOffice } from "officeparser";
-import { initializeApp, cert } from "firebase-admin/app";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import http from "http";
 
 // Initialize Firebase Admin if credentials are provided
@@ -37,6 +38,53 @@ async function startServer() {
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // ---- Authentication gate for every /api route defined below ----
+  // Verifies the caller's Firebase ID token and applies the same access
+  // policy as firestore.rules. /api/health is defined above this line and
+  // stays public so App Engine can health-check the service.
+  const ALLOWED_DOMAIN = "gostratos.vc";
+  const REVOKED_EMAILS = new Set([
+    "dwhite@gostratos.vc",
+    "cjrothai@gmail.com",
+    "joe@highwayventures.com",
+  ]);
+
+  app.use("/api", async (req, res, next) => {
+    if (!getApps().length) {
+      if (process.env.NODE_ENV === "production") {
+        console.error("Firebase Admin is not initialised — refusing API requests.");
+        return res.status(503).json({ error: "Server authentication is not configured." });
+      }
+      console.warn("Firebase Admin not initialised — skipping API auth (development only).");
+      return next();
+    }
+
+    try {
+      const header = req.headers.authorization || "";
+      const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+      if (!token) {
+        return res.status(401).json({ error: "Not signed in." });
+      }
+
+      const decoded = await getAuth().verifyIdToken(token);
+      const email = (decoded.email || "").toLowerCase();
+      const allowed =
+        decoded.email_verified === true &&
+        email.endsWith("@" + ALLOWED_DOMAIN) &&
+        !REVOKED_EMAILS.has(email);
+
+      if (!allowed) {
+        console.warn(`Rejected API call from unauthorized account: ${email || "unknown"}`);
+        return res.status(403).json({ error: "This account is not authorized to use the Stratos VP CRM." });
+      }
+
+      (req as any).user = decoded;
+      next();
+    } catch (err) {
+      return res.status(401).json({ error: "Your session has expired. Please sign in again." });
+    }
   });
 
   const getGeminiAI = () => {

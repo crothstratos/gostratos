@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import { useState } from 'react';
 
 export function useGemini() {
@@ -16,7 +17,7 @@ export function useGemini() {
     setError(null);
 
     try {
-      const response = await fetch('/api/extract', {
+      const response = await apiFetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes }),
@@ -57,7 +58,7 @@ export function useGemini() {
     setError(null);
 
     try {
-      const response = await fetch('/api/describe', {
+      const response = await apiFetch('/api/describe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, website }),
@@ -101,7 +102,7 @@ export function useGemini() {
     setIsScanning(true);
     setError(null);
     try {
-      const response = await fetch('/api/scan-website', {
+      const response = await apiFetch('/api/scan-website', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
@@ -140,7 +141,7 @@ export function useGemini() {
       reader.onload = async (e) => {
         try {
           const base64Data = e.target?.result as string;
-          const response = await fetch('/api/extract', {
+          const response = await apiFetch('/api/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'deck', input: base64Data }),
@@ -185,7 +186,7 @@ export function useGemini() {
     setIsGenerating(true);
     setError(null);
     try {
-      const response = await fetch('/api/discover-coinvestors', {
+      const response = await apiFetch('/api/discover-coinvestors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyName, companyDescription, vertical })
