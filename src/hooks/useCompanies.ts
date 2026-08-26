@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Company, Stage, InteractionLog } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -7,6 +7,12 @@ import { v4 as uuidv4 } from 'uuid';
 export function useCompanies(user: any) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Records the lastModified value this browser most recently wrote for each
+  // company. Without it, saving twice from the same open modal would look
+  // like a conflict with ourselves: the modal keeps its own copy of the
+  // record and doesn't learn the new timestamp after a save.
+  const ownWrites = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (!user) {
@@ -207,16 +213,70 @@ export function useCompanies(user: any) {
       finalCompany.funds = Array.from(new Set([...(finalCompany.funds || []), 'Arkansas']));
     }
 
+    // Remove undefined values to prevent Firestore errors
+    const cleanCompany = Object.fromEntries(
+      Object.entries({ ...finalCompany, updatedBy: user?.email || 'unknown' })
+        .filter(([_, v]) => v !== undefined)
+    );
+
+    // The timestamp the editor started from. If the stored record has moved
+    // on since then, someone else saved while this edit was open.
+    const startedFrom = updatedCompany.lastModified;
+
     try {
       const companyRef = doc(db, 'companies', updatedCompany.id);
-      
-      // Remove undefined values to prevent Firestore errors
-      const cleanCompany = Object.fromEntries(
-        Object.entries(finalCompany).filter(([_, v]) => v !== undefined)
-      );
-      
-      await updateDoc(companyRef, cleanCompany);
-    } catch (error) {
+
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(companyRef);
+        if (!snap.exists()) {
+          const err: any = new Error('COMPANY_DELETED');
+          err.__conflict = 'deleted';
+          throw err;
+        }
+
+        const stored = snap.data() as Company;
+        const storedModified = stored.lastModified;
+        const isOurOwnWrite = ownWrites.current.get(updatedCompany.id) === storedModified;
+
+        if (startedFrom && storedModified && storedModified !== startedFrom && !isOurOwnWrite) {
+          const err: any = new Error('EDIT_CONFLICT');
+          err.__conflict = 'changed';
+          err.__by = (stored as any).updatedBy || 'someone else';
+          throw err;
+        }
+
+        tx.update(companyRef, cleanCompany);
+
+        // Append-only audit record of who changed what, and when.
+        const changedFields = oldCompany
+          ? Object.keys(finalCompany).filter(
+              k => JSON.stringify((finalCompany as any)[k]) !== JSON.stringify((oldCompany as any)[k])
+            )
+          : ['(new record)'];
+
+        tx.set(doc(collection(db, 'audit')), {
+          companyId: updatedCompany.id,
+          companyName: updatedCompany.name || '(unnamed)',
+          changedBy: user?.email || 'unknown',
+          changedAt: now,
+          changedFields,
+        });
+      });
+
+      ownWrites.current.set(updatedCompany.id, now);
+    } catch (error: any) {
+      if (error?.__conflict === 'changed') {
+        alert(
+          `This company was changed by ${error.__by} while you had it open.\n\n` +
+          `Your changes were NOT saved, so nothing of theirs was overwritten. ` +
+          `Close the company, reopen it to see the current version, and reapply your edits.`
+        );
+        return;
+      }
+      if (error?.__conflict === 'deleted') {
+        alert('This company was deleted by someone else while you had it open. Your changes were not saved.');
+        return;
+      }
       handleFirestoreError(error, OperationType.UPDATE, 'companies');
     }
   }, [companies, user]);

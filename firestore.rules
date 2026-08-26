@@ -43,6 +43,14 @@ service cloud.firestore {
       return signedIn() && allowed() && !revoked();
     }
 
+    // Audit records are append-only: anyone authorized can write one and
+    // read the history, but nobody can edit or delete an entry. An audit
+    // trail you can rewrite is not an audit trail.
+    match /audit/{entry} {
+      allow read, create: if hasAccess();
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if hasAccess();
     }
