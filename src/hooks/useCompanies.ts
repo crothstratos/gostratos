@@ -1,0 +1,271 @@
+import { useState, useEffect, useCallback } from 'react';
+import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { Company, Stage, InteractionLog } from '../types';
+import { initialCompanies } from '../data';
+import { v4 as uuidv4 } from 'uuid';
+
+export function useCompanies(user: any) {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'companies'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          // Seed companies
+          for (const c of initialCompanies) {
+            const cleanC = Object.fromEntries(
+              Object.entries(c).filter(([_, v]) => v !== undefined)
+            );
+            try {
+              await setDoc(doc(db, 'companies', c.id), cleanC);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.CREATE, 'companies');
+            }
+          }
+          setCompanies(initialCompanies);
+        } else {
+          let fetchedCompanies: Company[] = [];
+          snapshot.forEach((d) => {
+            const data = d.data() as Company;
+            if (data.interactions) {
+              data.interactions = data.interactions.map(i => {
+                try {
+                  const dateObj = new Date(i.date);
+                  const year = dateObj.getFullYear();
+                  if (year <= 1970) {
+                    const ms = dateObj.getTime();
+                    if (ms > 10000 && ms < 100000) {
+                      const recoveredDate = new Date((ms - 25569) * 86400 * 1000);
+                      return { ...i, date: recoveredDate.toISOString() };
+                    }
+                  }
+                  return i;
+                } catch(e) {
+                  return i;
+                }
+              }).filter(i => {
+                try {
+                  const year = new Date(i.date).getFullYear();
+                  return year > 1980;
+                } catch(e) {
+                  return true;
+                }
+              });
+            }
+            fetchedCompanies.push({ ...data, id: d.id });
+          });
+          
+          const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
+          const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+          
+          if (isRestrictedUser) {
+            fetchedCompanies = fetchedCompanies.filter(c => c.fund === 'Arkansas' || (c.funds && c.funds.includes('Arkansas')));
+          }
+          
+          setCompanies(fetchedCompanies);
+        }
+        setIsLoading(false);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'companies');
+        setIsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Automated rule: Move companies in Initial Review for 3 weeks to Watchlist
+  useEffect(() => {
+    if (isLoading || companies.length === 0) return;
+
+    const now = new Date();
+    const threeWeeksInMs = 3 * 7 * 24 * 60 * 60 * 1000;
+    
+    const staleCompanies = companies.filter(company => {
+      if (company.stage !== 'Initial Review') return false;
+      
+      let dateEntered = null;
+      if (company.stageHistory && company.stageHistory.length > 0) {
+        // Find the entry that corresponds to entering "Initial Review"
+        const lastEntry = company.stageHistory[company.stageHistory.length - 1];
+        if (lastEntry.stage === 'Initial Review') {
+          dateEntered = new Date(lastEntry.date);
+        } else {
+          // Fallback to lastModified if the history is malformed for current stage
+          dateEntered = company.lastModified ? new Date(company.lastModified) : null;
+        }
+      } else {
+        // Fallback to lastModified if no stageHistory exists
+        dateEntered = company.lastModified ? new Date(company.lastModified) : null;
+      }
+
+      if (dateEntered && (now.getTime() - dateEntered.getTime() > threeWeeksInMs)) {
+        return true;
+      }
+      return false;
+    });
+
+    if (staleCompanies.length > 0) {
+      staleCompanies.forEach(company => {
+        const updateDateStr = new Date().toISOString();
+        const newInteraction: InteractionLog = {
+          id: uuidv4(),
+          date: updateDateStr,
+          type: 'Other',
+          notes: 'No response received after 3 weeks in Initial Review.',
+          sentiment: 'Neutral'
+        };
+
+        const companyRef = doc(db, 'companies', company.id);
+        
+        const updates = {
+          stage: 'Watchlist' as Stage,
+          lastModified: updateDateStr,
+          stageHistory: [...(company.stageHistory || []), { stage: 'Watchlist' as Stage, date: updateDateStr }],
+          interactions: [newInteraction, ...(company.interactions || [])]
+        };
+
+        updateDoc(companyRef, updates).catch(err => {
+          handleFirestoreError(err, OperationType.UPDATE, 'companies');
+        });
+      });
+    }
+  }, [companies, isLoading]);
+
+  const handleMoveCompany = useCallback(async (companyId: string, newStage: Stage) => {
+    const now = new Date().toISOString();
+    
+    try {
+      const company = companies.find(c => c.id === companyId);
+      if (company && company.stage !== newStage) {
+        const dateStr = new Date(now).toLocaleDateString();
+        const newInteraction: InteractionLog = {
+          id: uuidv4(),
+          date: now,
+          type: 'Other',
+          notes: `Company moved to ${newStage} on ${dateStr}`,
+          sentiment: 'Neutral'
+        };
+
+        const companyRef = doc(db, 'companies', companyId);
+        await updateDoc(companyRef, {
+          stage: newStage,
+          lastModified: now,
+          stageHistory: [...(company.stageHistory || []), { stage: newStage, date: now }],
+          interactions: [newInteraction, ...(company.interactions || [])]
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'companies');
+    }
+  }, [companies]);
+
+  const handleSaveCompany = useCallback(async (updatedCompany: Company) => {
+    const now = new Date().toISOString();
+    const oldCompany = companies.find(c => c.id === updatedCompany.id);
+    let newHistory = updatedCompany.stageHistory || [];
+    let updatedInteractions = updatedCompany.interactions || [];
+    
+    if (oldCompany && oldCompany.stage !== updatedCompany.stage) {
+      const lastHistory = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
+      if (!lastHistory || lastHistory.stage !== updatedCompany.stage) {
+        newHistory = [...newHistory, { stage: updatedCompany.stage, date: now }];
+      }
+      
+      const hasMoveLog = updatedInteractions.some(i => 
+        i.notes?.includes(updatedCompany.stage) && 
+        (i.notes?.includes('moved from') || i.notes?.includes('moved to'))
+      );
+      
+      if (!hasMoveLog) {
+        const dateStr = new Date(now).toLocaleDateString();
+        const newInteraction: InteractionLog = {
+          id: uuidv4(),
+          date: now,
+          type: 'Other',
+          notes: `Company moved to ${updatedCompany.stage} on ${dateStr}`,
+          sentiment: 'Neutral'
+        };
+        updatedInteractions = [newInteraction, ...updatedInteractions];
+      }
+    }
+    
+    const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
+    const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+
+    const finalCompany = { 
+      ...updatedCompany, 
+      lastModified: now, 
+      stageHistory: newHistory,
+      interactions: updatedInteractions
+    };
+    
+    if (isRestrictedUser) {
+      finalCompany.fund = 'Arkansas';
+      finalCompany.funds = Array.from(new Set([...(finalCompany.funds || []), 'Arkansas']));
+    }
+
+    try {
+      const companyRef = doc(db, 'companies', updatedCompany.id);
+      
+      // Remove undefined values to prevent Firestore errors
+      const cleanCompany = Object.fromEntries(
+        Object.entries(finalCompany).filter(([_, v]) => v !== undefined)
+      );
+      
+      await updateDoc(companyRef, cleanCompany);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'companies');
+    }
+  }, [companies, user]);
+
+  const handleAddCompany = useCallback(async (newCompany: Company) => {
+    try {
+      const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
+      const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+      
+      const companyToSave = { ...newCompany };
+      if (isRestrictedUser) {
+        companyToSave.fund = 'Arkansas';
+        companyToSave.funds = Array.from(new Set([...(companyToSave.funds || []), 'Arkansas']));
+      }
+
+      // Remove undefined values to prevent Firestore errors
+      const cleanCompany = Object.fromEntries(
+        Object.entries(companyToSave).filter(([_, v]) => v !== undefined)
+      );
+      
+      await setDoc(doc(db, 'companies', companyToSave.id), cleanCompany);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.CREATE, 'companies');
+    }
+  }, [user]);
+
+  const handleDeleteCompany = useCallback(async (companyId: string) => {
+    try {
+      await deleteDoc(doc(db, 'companies', companyId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'companies');
+    }
+  }, []);
+
+  return {
+    companies,
+    isLoading,
+    handleMoveCompany,
+    handleSaveCompany,
+    handleAddCompany,
+    handleDeleteCompany
+  };
+}

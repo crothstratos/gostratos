@@ -1,0 +1,196 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "A company in the CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "website": { "type": "string" },
+        "slogan": { "type": "string" },
+        "vertical": { "type": "string" },
+        "source": { "type": "string" },
+        "stage": { "type": "string" },
+        "basics": { "type": "string" },
+        "marketProblem": { "type": "string" },
+        "companySolution": { "type": "string" },
+        "competition": { "type": "string" },
+        "pricing": { "type": "string" },
+        "gtm": { "type": "string" },
+        "revenue": { "type": "string" },
+        "dealTerms": { "type": "string" },
+        "pastFinancing": { "type": "string" },
+        "reasonForPass": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "url": { "type": "string" },
+              "type": { "type": "string" },
+              "size": { "type": "number" }
+            }
+          }
+        },
+        "lastModified": { "type": "string" },
+        "stageHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stage": { "type": "string" },
+              "date": { "type": "string" }
+            }
+          }
+        },
+        "ddCompletedItems": { "type": "array", "items": { "type": "string" } },
+        "ddFindings": { "type": "object" },
+        "ddCurrentStage": { "type": "string" },
+        "ddVerdict": { "type": "string" },
+        "portfolioHealth": { "type": "string" },
+        "portfolioExitScenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "number" },
+              "value": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["id", "name", "stage", "basics", "marketProblem", "companySolution", "competition", "pricing", "gtm", "revenue", "dealTerms", "pastFinancing"]
+    },
+    "InvestorProfile": {
+      "title": "InvestorProfile",
+      "description": "An investor profile in the CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmName": { "type": "string" },
+        "website": { "type": "string" },
+        "linkedin": { "type": "string" },
+        "calendarLink": { "type": "string" },
+        "stratosOwner": { "type": "string" },
+        "description": { "type": "string" },
+        "leadPartner": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "location": { "type": "string" },
+        "total_interactions": { "type": "number" },
+        "type": { "type": "string" },
+        "aum": { "type": "string" },
+        "typicalCheckSize": { "type": "number" },
+        "strategicFit": { "type": "string" },
+        "stage": { "type": "string" },
+        "softCircleAmount": { "type": "number" },
+        "warmIntroSource": { "type": "string" },
+        "interactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "date": { "type": "string" },
+              "type": { "type": "string" },
+              "notes": { "type": "string" },
+              "sentiment": { "type": "string" },
+              "followUpDate": { "type": "string" },
+              "followUpRequirements": { "type": "string" }
+            }
+          }
+        },
+        "lastModified": { "type": "string" },
+        "sequenceNumber": { "type": "string" },
+        "subscriptionPaperworkSigned": { "type": "boolean" },
+        "amlRequirementsSentByApex": { "type": "boolean" },
+        "allAmlDocumentationReceived": { "type": "boolean" },
+        "documentsCountersigned": { "type": "boolean" },
+        "fundsReceived": { "type": "boolean" },
+        "managementFeePercent": { "type": "number" },
+        "carryFeePercent": { "type": "number" },
+        "annualManagementFee": { "type": "number" },
+        "quarterlyManagementFee": { "type": "number" }
+      },
+      "required": ["id", "firmName", "leadPartner", "type", "aum", "typicalCheckSize", "strategicFit", "stage", "softCircleAmount", "warmIntroSource", "interactions", "lastModified"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "A calendar event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string" },
+        "location": { "type": "string" },
+        "attendees": { "type": "string" },
+        "cost": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "title", "startDate", "endDate", "status", "location", "attendees", "cost", "notes"]
+    },
+    "InvestorRepositoryEntry": {
+      "title": "InvestorRepositoryEntry",
+      "description": "An entry in the investors repository",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmName": { "type": "string" },
+        "website": { "type": "string" },
+        "contactName": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "fundDetails": { "type": "string" },
+        "investmentStage": { "type": "string" },
+        "checkSize": { "type": "string" },
+        "verticals": { "type": "string" },
+        "portfolioCompanies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "notes": { "type": "string" },
+        "lastModified": { "type": "string" }
+      },
+      "required": ["id", "firmName"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user of the CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "is_gmail_connected": { "type": "boolean" },
+        "gmail_refresh_token": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Users of the CRM"
+    },
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Companies in the CRM"
+    },
+    "/investors/{investorId}": {
+      "schema": { "$ref": "#/entities/InvestorProfile" },
+      "description": "Investors in the CRM"
+    },
+    "/investor_repository/{investorId}": {
+      "schema": { "$ref": "#/entities/InvestorRepositoryEntry" },
+      "description": "Investors repository entries"
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "Calendar events"
+    }
+  }
+}

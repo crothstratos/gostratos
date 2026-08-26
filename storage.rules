@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// Stratos VP CRM — Cloud Storage access policy
+// Governs pitch decks and documents uploaded under attachments/.
+// Mirrors the Firestore policy in firestore.rules.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function userEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function revoked() {
+      return userEmail() in [
+        'dwhite@gostratos.vc',
+        'cjrothai@gmail.com',
+        'joe@highwayventures.com'
+      ];
+    }
+
+    function allowed() {
+      return userEmail().matches('^[^@]+@gostratos[.]vc$')
+        || userEmail() in [
+          'placeholder@example.invalid'
+        ];
+    }
+
+    function hasAccess() {
+      return signedIn() && allowed() && !revoked();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if hasAccess();
+    }
+  }
+}

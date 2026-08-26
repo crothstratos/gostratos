@@ -1,0 +1,24 @@
+# Stratos VP CRM — App Engine Standard
+# Serves both the React front end and the Express API from one service.
+#
+# Secrets live in env.yaml, which is NOT committed. Copy env.yaml.example
+# to env.yaml and fill it in before deploying.
+
+runtime: nodejs22
+instance_class: F4
+
+includes:
+  - env.yaml
+
+env_variables:
+  NODE_ENV: "production"
+  VITE_APP_URL: "https://crm.gostratos.vc"
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 4
+
+handlers:
+  - url: /.*
+    script: auto
+    secure: always

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+coverage/
+.DS_Store
+*.log
+
+# Local secrets — never commit
+.env
+.env.local
+.env.*.local
+env.yaml
+
+# Committed config (public-by-design client values)
+!.env.example
+!.env.production
+!env.yaml.example
+
+# Migration leftovers
+_ai-studio-scrap/
+firestore.rules.bak-open

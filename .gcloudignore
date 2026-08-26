@@ -1,0 +1,9 @@
+.git
+.gitignore
+node_modules
+dist
+_ai-studio-scrap
+*.log
+.env
+.env.local
+firestore.rules.bak-open

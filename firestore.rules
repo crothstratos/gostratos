@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// Stratos VP CRM — Firestore access policy
+//
+// Access requires a signed-in Google account with a verified
+// @gostratos.vc email address that is not on the revoked list.
+//
+// To grant an outside collaborator access, add their address to the
+// EXTRA list in allowed(). To revoke someone, add them to revoked().
+// Redeploy with:  firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function userEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function revoked() {
+      return userEmail() in [
+        'dwhite@gostratos.vc',
+        'cjrothai@gmail.com',
+        'joe@highwayventures.com'
+      ];
+    }
+
+    function allowed() {
+      return userEmail().matches('^[^@]+@gostratos[.]vc$')
+        || userEmail() in [
+          // Individually approved outside collaborators go here, e.g.:
+          // 'advisor@example.com',
+          'placeholder@example.invalid'
+        ];
+    }
+
+    function hasAccess() {
+      return signedIn() && allowed() && !revoked();
+    }
+
+    match /{document=**} {
+      allow read, write: if hasAccess();
+    }
+  }
+}
