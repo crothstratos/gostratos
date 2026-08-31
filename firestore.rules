@@ -43,16 +43,48 @@ service cloud.firestore {
       return signedIn() && allowed() && !revoked();
     }
 
-    // Audit records are append-only: anyone authorized can write one and
-    // read the history, but nobody can edit or delete an entry. An audit
-    // trail you can rewrite is not an audit trail.
+    // IMPORTANT: Firestore combines matching allow rules with OR. A broad
+    // `match /{document=**} { allow write }` therefore GRANTS write to every
+    // collection, and no narrower rule can take it back — an earlier version
+    // of this file tried to make /audit append-only underneath such a
+    // catch-all, and the restriction did nothing at all.
+    //
+    // So collections are listed explicitly and there is no catch-all. If a
+    // new collection is added to the app, add it here too, or the app will
+    // fail with "Missing or insufficient permissions" on that collection.
+    //
+    // Collections in use: attachments, audit, companies, company_data_pool,
+    // events, investor_repository, investors.
+
+    match /companies/{id} {
+      allow read, write: if hasAccess();
+    }
+
+    match /investors/{id} {
+      allow read, write: if hasAccess();
+    }
+
+    match /investor_repository/{id} {
+      allow read, write: if hasAccess();
+    }
+
+    match /events/{id} {
+      allow read, write: if hasAccess();
+    }
+
+    match /attachments/{id} {
+      allow read, write: if hasAccess();
+    }
+
+    match /company_data_pool/{id} {
+      allow read, write: if hasAccess();
+    }
+
+    // Append-only, and this time it actually is: nothing else matches these
+    // documents, so create is the only write that any rule permits.
     match /audit/{entry} {
       allow read, create: if hasAccess();
       allow update, delete: if false;
-    }
-
-    match /{document=**} {
-      allow read, write: if hasAccess();
     }
   }
 }

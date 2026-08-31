@@ -84,7 +84,11 @@ export const CalendarView = React.memo(function CalendarView({ events, onAddEven
     if (!formData.title || !formData.startDate || !formData.endDate) return;
 
     const eventToSave: CalendarEvent = {
-      id: editingEvent ? editingEvent.id : formData.title,
+      // Was formData.title, which made the title the Firestore document id:
+      // two events with the same name overwrote each other, and a title
+      // containing '/' produced an invalid path. Existing events keep
+      // their current ids; only new ones get a generated one.
+      id: editingEvent ? editingEvent.id : uuidv4(),
       title: formData.title,
       startDate: formData.startDate,
       endDate: formData.endDate,

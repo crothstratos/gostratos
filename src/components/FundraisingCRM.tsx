@@ -138,14 +138,9 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
             } catch(e) {
               return i;
             }
-          }).filter((i: any) => {
-            try {
-              const year = new Date(i.date).getFullYear();
-              return year > 1980;
-            } catch(e) {
-              return true;
-            }
           });
+          // See useCompanies.ts — this filter silently deleted activity whose
+          // date could not be parsed, and the filtered array was written back.
           fetchedInvestors.push({ 
             ...data, 
             id: doc.id,

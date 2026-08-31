@@ -37,8 +37,12 @@ export function useGemini() {
         errorMessage = "Your Gemini API key is missing or invalid. The server's Gemini API key is not configured. Contact your administrator.";
       }
       
+      // Rate-limit and quota errors used to be swallowed into a console
+      // warning, so the user saw a spinner stop and nothing else — and
+      // nobody could tell that AI spend was being throttled. They are the
+      // most likely failure here, so they get the clearest message.
       if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('429') || errorMessage.toLowerCase().includes('exhausted')) {
-        console.warn('Rate limit exceeded. Suppressing error message.');
+        setError('Too many AI requests in a short time. Please wait a minute and try again.');
       } else {
         setError(`Failed to auto-populate: ${errorMessage}`);
       }
@@ -80,8 +84,12 @@ export function useGemini() {
         errorMessage = "Your Gemini API key is missing or invalid. The server's Gemini API key is not configured. Contact your administrator.";
       }
       
+      // Rate-limit and quota errors used to be swallowed into a console
+      // warning, so the user saw a spinner stop and nothing else — and
+      // nobody could tell that AI spend was being throttled. They are the
+      // most likely failure here, so they get the clearest message.
       if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('429') || errorMessage.toLowerCase().includes('exhausted')) {
-        console.warn('Rate limit exceeded. Suppressing error message.');
+        setError('Too many AI requests in a short time. Please wait a minute and try again.');
       } else {
         setError(`Failed to generate description: ${errorMessage}`);
       }
@@ -122,8 +130,12 @@ export function useGemini() {
         errorMessage = "Your Gemini API key is missing or invalid. The server's Gemini API key is not configured. Contact your administrator.";
       }
       
+      // Rate-limit and quota errors used to be swallowed into a console
+      // warning, so the user saw a spinner stop and nothing else — and
+      // nobody could tell that AI spend was being throttled. They are the
+      // most likely failure here, so they get the clearest message.
       if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('429') || errorMessage.toLowerCase().includes('exhausted')) {
-        console.warn('Rate limit exceeded. Suppressing error message.');
+        setError('Too many AI requests in a short time. Please wait a minute and try again.');
       } else {
         setError(`Failed to scan website: ${errorMessage}`);
       }
@@ -161,8 +173,12 @@ export function useGemini() {
             errorMessage = "Your Gemini API key is missing or invalid. The server's Gemini API key is not configured. Contact your administrator.";
           }
           
+      // Rate-limit and quota errors used to be swallowed into a console
+      // warning, so the user saw a spinner stop and nothing else — and
+      // nobody could tell that AI spend was being throttled. They are the
+      // most likely failure here, so they get the clearest message.
       if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('429') || errorMessage.toLowerCase().includes('exhausted')) {
-        console.warn('Rate limit exceeded. Suppressing error message.');
+        setError('Too many AI requests in a short time. Please wait a minute and try again.');
       } else {
         setError(`Failed to extract pitch deck: ${errorMessage}`);
       }
@@ -202,8 +218,10 @@ export function useGemini() {
     } catch (err: any) {
       
       const msg = err.message || 'An error occurred during AI extraction.';
+      // See the other handlers in this file: rate-limit errors are the most
+      // likely failure and were the one thing the user never got told about.
       if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('429') || msg.toLowerCase().includes('exhausted')) {
-        console.warn('Rate limit exceeded. Suppressing error message.');
+        setError('Too many AI requests in a short time. Please wait a minute and try again.');
       } else {
         setError(msg);
       }

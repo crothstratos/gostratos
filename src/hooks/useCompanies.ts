@@ -50,14 +50,13 @@ export function useCompanies(user: any) {
                 } catch(e) {
                   return i;
                 }
-              }).filter(i => {
-                try {
-                  const year = new Date(i.date).getFullYear();
-                  return year > 1980;
-                } catch(e) {
-                  return true;
-                }
               });
+              // NOTE: this used to drop any interaction whose date failed to
+              // parse. new Date('').getFullYear() returns NaN rather than
+              // throwing, and NaN > 1980 is false — so the catch block that
+              // was meant to keep those entries never ran, and the filtered
+              // array was what got written back on the next save. Interactions
+              // were being deleted permanently. Nothing is dropped now.
             }
             fetchedCompanies.push({ ...data, id: d.id });
           });

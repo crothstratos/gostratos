@@ -73,9 +73,16 @@ export const CompanyMigrationTool: React.FC = () => {
         if (existingIds.has(newDocId)) {
           patchedCount++;
           try {
-            await updateDoc(doc(db, 'companies', newDocId), {
-              gtm: gtm.substring(0, 5000) || String(data['Got to Market Plan'] || '').substring(0, 5000),
-            });
+            // Only write gtm when the source actually has a value. This
+            // previously wrote an empty string whenever the pool row had no
+            // GTM column, so re-running the migration erased every
+            // hand-written go-to-market section in the CRM.
+            const sourceGtm = (gtm || String(data['Got to Market Plan'] || '')).trim();
+            if (sourceGtm) {
+              await updateDoc(doc(db, 'companies', newDocId), {
+                gtm: sourceGtm.substring(0, 5000),
+              });
+            }
           } catch (e: any) {
              console.error(`Failed to update migrated fields for ${newDocId}`, e);
           }

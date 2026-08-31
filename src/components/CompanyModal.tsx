@@ -59,6 +59,10 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
       const snapshot = { ...formData };
       delete snapshot.versions;
       delete snapshot.activeVersionId;
+      // See handleSubmit — append-only logs stay out of version snapshots.
+      delete snapshot.interactions;
+      delete snapshot.attachments;
+      delete snapshot.stageHistory;
       currentVersions[currentIndex] = {
         ...currentVersions[currentIndex],
         data: snapshot
@@ -420,6 +424,14 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
         const snapshot = { ...finalData };
         delete snapshot.versions;
         delete snapshot.activeVersionId;
+        // These are company-wide append-only logs, not per-version data.
+        // Copying them into every version multiplied the document size on
+        // each save and marched the record toward Firestore's 1MB ceiling.
+        // handleVersionChange restores with a spread, so omitting them here
+        // means the live values are preserved rather than blanked.
+        delete snapshot.interactions;
+        delete snapshot.attachments;
+        delete snapshot.stageHistory;
         versions[currentIndex] = {
           ...versions[currentIndex],
           data: snapshot

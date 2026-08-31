@@ -34,7 +34,11 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000; // Cloud Run injects PORT
 
   // API routes FIRST
-  app.use(express.json({ limit: "100mb" }));
+  // NOTE: body parsing is deliberately NOT registered here. Express runs
+  // middleware in registration order, so a parser mounted above the auth
+  // gate buffers and parses payloads from unauthenticated callers before
+  // rejecting them — enough concurrent large posts would exhaust the
+  // instance without anyone logging in. Parsers are mounted below the gate.
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -85,6 +89,50 @@ async function startServer() {
     } catch (err) {
       return res.status(401).json({ error: "Your session has expired. Please sign in again." });
     }
+  });
+
+  // Bodies are parsed only once the caller is known to be one of us.
+  // /api/extract accepts base64 pitch decks and needs headroom; nothing
+  // else does.
+  app.use("/api/extract", express.json({ limit: "25mb" }));
+  app.use(express.json({ limit: "2mb" }));
+
+  // Per-user rate limit on the AI routes. These call Gemini — two of them
+  // with grounded search, which bills at a higher rate — and previously
+  // nothing stopped a runaway client loop from spending without limit.
+  // In-memory, so the effective ceiling is this multiplied by the instance
+  // count; that is a bound, which is what was missing.
+  const RATE_WINDOW_MS = 60_000;
+  const RATE_MAX_PER_WINDOW = 20;
+  const rateBuckets = new Map<string, { start: number; count: number }>();
+
+  app.use("/api", (req, res, next) => {
+    const uid = (req as any).user?.uid || "unknown";
+    const now = Date.now();
+
+    if (rateBuckets.size > 500) {
+      for (const [key, b] of rateBuckets) {
+        if (now - b.start > RATE_WINDOW_MS) rateBuckets.delete(key);
+      }
+    }
+
+    let bucket = rateBuckets.get(uid);
+    if (!bucket || now - bucket.start > RATE_WINDOW_MS) {
+      bucket = { start: now, count: 0 };
+      rateBuckets.set(uid, bucket);
+    }
+
+    bucket.count++;
+    if (bucket.count > RATE_MAX_PER_WINDOW) {
+      const retryAfter = Math.ceil((bucket.start + RATE_WINDOW_MS - now) / 1000);
+      console.warn(`Rate limit hit by ${(req as any).user?.email || uid}`);
+      res.setHeader("Retry-After", String(retryAfter));
+      return res.status(429).json({
+        error: `You have made too many AI requests in a short time. Please wait ${retryAfter} seconds and try again.`,
+      });
+    }
+
+    next();
   });
 
   const getGeminiAI = () => {
