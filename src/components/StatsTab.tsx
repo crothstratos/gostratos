@@ -98,10 +98,10 @@ export const StatsTab = React.memo(function StatsTab({ companies, onNavigateToCR
     });
 
     const result = Object.keys(dataByMonth).map(monthLabel => {
-       // Hardcoded override to remove test data in DD for Mar 2026
-       if (monthLabel === 'Mar 2026' && dataByMonth[monthLabel]['DD']) {
-         dataByMonth[monthLabel]['DD'] = Math.max(0, (dataByMonth[monthLabel]['DD'] as number) - 2);
-       }
+       // A hardcoded 'remove test data' subtraction of 2 from the Mar 2026
+       // DD count used to sit here. It ran for every user, understated a real
+       // month permanently, and did not touch the drill-down list — so the
+       // cell said 5 while clicking it showed 7 companies.
        
        return {
          month: monthLabel,

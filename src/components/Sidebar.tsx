@@ -5,7 +5,7 @@ import { useTheme } from './ThemeContext';
 import { useAuth } from './AuthContext';
 import { StratosLogo } from './StratosLogo';
 
-export type TabType = 'crm' | 'stats' | 'sourcing' | 'dd' | 'calendar' | 'portfolio' | 'fundraising' | 'investors' | 'shortlist' | 'search';
+export type TabType = 'crm' | 'stats' | 'dd' | 'calendar' | 'portfolio' | 'fundraising' | 'investors' | 'shortlist' | 'search';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -83,16 +83,6 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
           >
             <SearchCode size={18} className={activeTab === 'search' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Search
-          </button>
-          <button
-            onClick={() => { setActiveTab('sourcing'); setIsOpen(false); }}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'sourcing' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
-            )}
-          >
-            <SearchCode size={18} className={activeTab === 'sourcing' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
-            Company Sourcing
           </button>
           <button
             onClick={() => { setActiveTab('dd'); setIsOpen(false); }}

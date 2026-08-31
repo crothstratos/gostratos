@@ -37,7 +37,6 @@ export const Header = React.memo(function Header({
         </button>
         <h2 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white truncate max-w-[120px] sm:max-w-xs md:max-w-none">
           {activeTab === 'crm' && 'Companies'}
-          {activeTab === 'sourcing' && 'Company Sourcing'}
           {activeTab === 'dd' && 'Due Diligence (DD)'}
           {activeTab === 'calendar' && 'Events Calendar'}
           {activeTab === 'portfolio' && 'Portfolio Monitoring'}

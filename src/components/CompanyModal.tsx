@@ -1469,9 +1469,18 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
                                   type="text"
                                   value={entry.revenue || ''}
                                   onChange={(e) => {
+                                    // \D stripped the decimal point rather than
+                                    // truncating at it, so 2500000.75 became
+                                    // 250,000,075 and typing 1.5 gave 15.
                                     const rawValue = e.target.value.replace(/,/g, '');
-                                    const numericValue = rawValue.replace(/\D/g, '');
-                                    const formattedValue = numericValue ? Number(numericValue).toLocaleString('en-US') : '';
+                                    const cleaned = rawValue.replace(/[^\d.]/g, '');
+                                    const [wholePart, ...restParts] = cleaned.split('.');
+                                    const decimals = restParts.join('').slice(0, 2);
+                                    const hasPoint = cleaned.includes('.');
+                                    const formattedValue = cleaned
+                                      ? (wholePart ? Number(wholePart).toLocaleString('en-US') : '0') +
+                                        (hasPoint ? '.' + decimals : '')
+                                      : '';
                                     
                                     const updatedGroup = [...(formData.revenueHistory || [])];
                                     const updatedEntries = [...entries];

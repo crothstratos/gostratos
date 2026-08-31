@@ -89,7 +89,13 @@ export function useEvents(user: any, accessToken?: string | null) {
   }, []);
 
   const handleUpdateEvent = useCallback(async (e: CalendarEvent) => {
-    if (e.id.startsWith('google-')) return;
+    // Events pulled from Google Calendar are read-only here. This used to
+    // return silently: the user edited the title, hit Save, the modal closed
+    // as though it worked, and the next poll redrew the event unchanged.
+    if (e.id.startsWith('google-')) {
+      alert('This event comes from your Google Calendar and cannot be edited here. Change it in Google Calendar and it will update automatically.');
+      return;
+    }
     try {
       const cleanEvent = Object.fromEntries(
         Object.entries(e).filter(([_, v]) => v !== undefined)
@@ -101,7 +107,11 @@ export function useEvents(user: any, accessToken?: string | null) {
   }, []);
 
   const handleDeleteEvent = useCallback(async (id: string) => {
-    if (id.startsWith('google-')) return;
+    // See handleUpdateEvent — this was also a silent no-op.
+    if (id.startsWith('google-')) {
+      alert('This event comes from your Google Calendar and cannot be deleted here. Delete it in Google Calendar and it will disappear automatically.');
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'events', id));
     } catch (error) {

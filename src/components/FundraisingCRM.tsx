@@ -212,7 +212,7 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
         
         const stageAmount = stageInvestors.reduce((sum, investor) => {
           return sum + (stage === 'Commitment' 
-            ? (investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize ?? 0)
+            ? (investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize || 0)
             : (investor.typicalCheckSize ?? 0));
         }, 0);
         
@@ -234,7 +234,7 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
 
         const tableData = stageInvestors.map(investor => {
           const amount = stage === 'Commitment' 
-            ? formatCurrency(investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize)
+            ? formatCurrency(investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize)
             : formatCurrency(investor.typicalCheckSize);
             
           const lastInteraction = (investor.interactions?.length || 0) > 0 
@@ -328,7 +328,7 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
         
         stageInvestors.forEach(investor => {
           const amount = stage === 'Commitment' 
-            ? (investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize ?? 0)
+            ? (investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize || 0)
             : (investor.typicalCheckSize ?? 0);
             
           const lastInteraction = (investor.interactions?.length || 0) > 0 
@@ -398,13 +398,27 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
           if (typeof rawCheckSize === 'number') {
             checkSize = rawCheckSize;
           } else if (typeof rawCheckSize === 'string') {
-            const cleanStr = rawCheckSize.replace(/[^0-9.MmkK]/g, '');
-            if (cleanStr.toLowerCase().includes('m')) {
-              checkSize = parseFloat(cleanStr) * 1000000;
-            } else if (cleanStr.toLowerCase().includes('k')) {
-              checkSize = parseFloat(cleanStr) * 1000;
-            } else {
-              checkSize = parseFloat(cleanStr) || 0;
+            // This used to strip every non-digit and then test for 'M'
+            // before 'k', so "$500k-$1M" became the string "500k1M",
+            // parseFloat took 500, the 'M' test matched, and the row was
+            // imported as $500,000,000 instead of about $750k.
+            //
+            // Now: take the first number, and the unit attached to it. For a
+            // range, that is the low end — deliberately conservative, so an
+            // import understates rather than inflating the pipeline.
+            const compact = rawCheckSize.replace(/,/g, '');
+            const match = compact.match(/([\d.]+)\s*([mMkK])?/);
+            if (match) {
+              let value = parseFloat(match[1]);
+              let unit = (match[2] || '').toLowerCase();
+              if (!unit) {
+                // "$1-2M" — the unit trails the range rather than the first number.
+                const trailing = compact.match(/[mMkK]/);
+                unit = trailing ? trailing[0].toLowerCase() : '';
+              }
+              if (unit === 'm') value *= 1000000;
+              else if (unit === 'k') value *= 1000;
+              checkSize = Number.isFinite(value) ? value : 0;
             }
           }
 
@@ -474,12 +488,20 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
       .reduce((sum, i) => sum + (i.actualCommitmentAmount ?? i.softCircleAmount ?? 0), 0);
   }, [filteredInvestors]);
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount?: number | null) => {
+    // Documents predating these fields have no value, and Intl formats
+    // undefined as the literal string "$NaN" — which was reaching Kanban
+    // cards, investor profiles and the PDF sent to LPs.
+    // null and undefined both mean "no value recorded" — Number(null) is 0,
+    // so guarding on isFinite alone would print $0 and imply a real zero.
+    if (amount === null || amount === undefined) return '—';
+    const value = Number(amount);
+    if (!Number.isFinite(value)) return '—';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       maximumFractionDigits: 0,
-    }).format(amount);
+    }).format(value);
   };
 
   const updateInvestorStage = async (id: string, newStage: FundraisingStage) => {
@@ -1046,7 +1068,7 @@ service cloud.firestore {
                             <DollarSign className="w-4 h-4 mr-2.5 shrink-0 text-slate-400" />
                             <span className="truncate font-medium text-slate-700 dark:text-slate-300">
                               {investor.stage === 'Commitment' 
-                                ? formatCurrency(investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize)
+                                ? formatCurrency(investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize)
                                 : formatCurrency(investor.typicalCheckSize)}
                             </span>
                           </div>
@@ -1146,7 +1168,7 @@ service cloud.firestore {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300 font-medium">
                       {investor.stage === 'Commitment' 
-                        ? formatCurrency(investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize)
+                        ? formatCurrency(investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize)
                         : formatCurrency(investor.typicalCheckSize)}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -2398,7 +2420,7 @@ service cloud.firestore {
                   
                   const stageAmount = stageInvestors.reduce((sum, investor) => {
                     return sum + (stage === 'Commitment' 
-                      ? (investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize ?? 0)
+                      ? (investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize || 0)
                       : (investor.typicalCheckSize ?? 0));
                   }, 0);
                   
@@ -2434,7 +2456,7 @@ service cloud.firestore {
                                 <td className="py-3 px-4 align-top">
                                   <div className="text-sm font-medium text-slate-900 dark:text-white">
                                     {stage === 'Commitment' 
-                                      ? formatCurrency(investor.actualCommitmentAmount ?? investor.softCircleAmount ?? investor.typicalCheckSize)
+                                      ? formatCurrency(investor.actualCommitmentAmount || investor.softCircleAmount || investor.typicalCheckSize)
                                       : formatCurrency(investor.typicalCheckSize)}
                                   </div>
                                 </td>

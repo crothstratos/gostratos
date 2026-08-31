@@ -385,57 +385,9 @@ Output ONLY the raw description text.
     }
   });
 
-  app.post("/api/analyze", async (req, res) => {
-    try {
-      const { input, type } = req.body;
-      const ai = getGeminiAI();
-
-      const prompt = `
-You are an expert VC analyst. Analyze the following startup data provided as type "${type}":
-${input}
-
-Extract the following information and return it strictly as a JSON object matching this schema (use null if not found):
-{
-  "name": "Startup Name",
-  "website": "Domain",
-  "location": "City, State",
-  "vertical": "Vertical category",
-  "basics": "One paragraph summary",
-  "founderName": "Founders",
-  "founderEmail": "Emails",
-  "revenue": "Revenue stats",
-  "dealTerms": "Deal terms",
-  "pastFinancing": "Past rounds",
-  "marketProblem": "Problem statement",
-  "companySolution": "Solution statement"
-}
-`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      let result = {};
-      try {
-        let text = response.text || "{}";
-        text = text
-          .replace(/^```(json)?\s*/i, "")
-          .replace(/```\s*$/, "")
-          .trim();
-        result = JSON.parse(text);
-      } catch (e) {
-        console.error("JSON parsing error in /api/analyze", e);
-      }
-      res.json(result);
-    } catch (err) {
-      console.error("Analyze Error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // The /api/analyze route was removed with the Company Sourcing feature.
+  // It was the only caller, and the feature was retired because it
+  // displayed fabricated analysis as though it were real results.
 
   app.post("/api/analyze-email", async (req, res) => {
     try {
