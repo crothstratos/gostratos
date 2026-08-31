@@ -39,13 +39,12 @@ export const Header = React.memo(function Header({
           {activeTab === 'crm' && 'Companies'}
           {activeTab === 'dd' && 'Due Diligence (DD)'}
           {activeTab === 'calendar' && 'Events Calendar'}
-          {activeTab === 'portfolio' && 'Portfolio Monitoring'}
           {activeTab === 'fundraising' && 'Fundraising CRM'}
         </h2>
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4 ml-4">
-        {['crm', 'dd', 'portfolio'].includes(activeTab) && (
+        {['crm', 'dd'].includes(activeTab) && (
           <>
             <div className="relative w-full max-w-[12rem] sm:max-w-[16rem]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />

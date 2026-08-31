@@ -104,16 +104,9 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
             <CalendarIcon size={18} className={activeTab === 'calendar' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Calendar
           </button>
-          <button
-            onClick={() => { setActiveTab('portfolio'); setIsOpen(false); }}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'portfolio' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
-            )}
-          >
-            <LineChart size={18} className={activeTab === 'portfolio' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
-            Portfolio Monitoring
-          </button>
+          {/* Portfolio Monitoring is hidden until it runs on real data. The
+              component is still in the repo; see the note at the top of
+              PortfolioMonitoring.tsx before re-enabling this. */}
           <button
             onClick={() => { setActiveTab('fundraising'); setIsOpen(false); }}
             className={cn(

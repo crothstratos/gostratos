@@ -1,3 +1,33 @@
+/**
+ * NOT CURRENTLY REACHABLE FROM THE APP — deliberately disconnected.
+ *
+ * This component displays hardcoded sample data under whichever real
+ * portfolio company is selected. Before it is re-enabled, every one of these
+ * must be replaced with values read from the company record:
+ *
+ *   - Total Invested, Ownership %, MoIC          (module constants)
+ *   - Cash on hand, monthly burn, runway         (module constants, so the
+ *                                                 red "4.5 months" badge fires
+ *                                                 for every company forever)
+ *   - The burn alert banner                      (computed from constants,
+ *                                                 so it is permanently on)
+ *   - Revenue and headcount charts               (module constants)
+ *   - Cap table, liquidation preference          (module constants)
+ *   - Board minutes, reporting compliance        (static text)
+ *   - Deal lead name                             (hardcoded, not a real
+ *                                                 team member)
+ *
+ * Two specific hazards:
+ *   1. The exit calculator multiplies exit values the user TYPES AND SAVES by
+ *      a hardcoded 12.5% ownership and $2.5m cost basis, and ignores the
+ *      liquidation preference shown alongside it. Real input, invented math.
+ *   2. "Upload Financials" reads the chosen file, discards it, waits two
+ *      seconds and swaps in a second hardcoded dataset, so it appears to have
+ *      worked. The grid is also editable with no save handler, so edits are
+ *      lost on tab change.
+ *
+ * Kept in the repository because the layout is worth reusing.
+ */
 import React, { useState } from 'react';
 import { Company } from '../types';
 import { cn } from '../utils';

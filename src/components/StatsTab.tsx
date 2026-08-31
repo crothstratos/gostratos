@@ -50,33 +50,49 @@ export const StatsTab = React.memo(function StatsTab({ companies, onNavigateToCR
       // Track the month each stage was reached
       
       
+      // Counting rule, decided deliberately:
+      //   Analyst Call and Partner Call count STAGE ENTRIES — a company that
+      //   comes back for a second analyst call counts twice, because the
+      //   number of calls held is the thing being measured.
+      //   Every other stage counts COMPANIES — each one contributes once, the
+      //   first time it reaches that stage.
+      //
+      // Consequence to be aware of: because two stages count entries, a
+      // column total can exceed the number of distinct companies. That is
+      // intended, not a bug.
+      const ENTRY_COUNTED_STAGES = new Set(['Analyst Call', 'Partner Call']);
+
       const reachedStagesList: {stage: string, monthLabel: string}[] = [];
       const reachedStagesMap = new Map<string, string>();
-      let hasAnalystCall = false;
 
       if (comp.stageHistory) {
         const sortedHistory = [...comp.stageHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         let previousStage = '';
         sortedHistory.forEach(h => {
           const monthLabel = new Date(h.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-          
-          if (!reachedStagesMap.has(h.stage) || (h.stage === 'Analyst Call' && previousStage !== 'Analyst Call')) {
+
+          const firstTimeReached = !reachedStagesMap.has(h.stage);
+          // A repeat entry only counts if the company actually left and came
+          // back — consecutive duplicate history rows are not a second call.
+          const isRepeatEntry = ENTRY_COUNTED_STAGES.has(h.stage) && previousStage !== h.stage;
+
+          if (firstTimeReached || isRepeatEntry) {
               reachedStagesMap.set(h.stage, monthLabel);
               reachedStagesList.push({ stage: h.stage, monthLabel });
-              if (h.stage === 'Analyst Call') hasAnalystCall = true;
           }
           previousStage = h.stage;
         });
       }
-      
+
+      // A company whose current stage never appears in its history — usually
+      // one imported without stage history. Attributed to lastModified, which
+      // is a known weakness: editing any field moves the company into the
+      // current month. Left as-is pending a decision on how to treat records
+      // with no history.
       if (comp.stage && !reachedStagesMap.has(comp.stage)) {
-        if (comp.stage === 'Analyst Call' && hasAnalystCall) {
-            // Already counted Analyst Call from history/interactions, don't fallback add it again
-        } else {
-            const fallbackMonth = new Date(comp.lastModified || addedStr).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-            reachedStagesMap.set(comp.stage, fallbackMonth);
-            reachedStagesList.push({ stage: comp.stage, monthLabel: fallbackMonth });
-        }
+        const fallbackMonth = new Date(comp.lastModified || addedStr).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        reachedStagesMap.set(comp.stage, fallbackMonth);
+        reachedStagesList.push({ stage: comp.stage, monthLabel: fallbackMonth });
       }
 
       

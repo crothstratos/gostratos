@@ -12,7 +12,8 @@ const KanbanBoard = React.lazy(() => import('./components/KanbanBoard').then(mod
 const StatsTab = React.lazy(() => import('./components/StatsTab').then(module => ({ default: module.StatsTab })));
 const DueDiligence = React.lazy(() => import('./components/DueDiligence').then(module => ({ default: module.DueDiligence })));
 const CalendarView = React.lazy(() => import('./components/CalendarView').then(module => ({ default: module.CalendarView })));
-const PortfolioMonitoring = React.lazy(() => import('./components/PortfolioMonitoring').then(module => ({ default: module.PortfolioMonitoring })));
+// PortfolioMonitoring is intentionally not routed — see the note at the top
+// of that component. Restore this import and its route when it runs on real data.
 const FundraisingCRM = React.lazy(() => import('./components/FundraisingCRM').then(module => ({ default: module.FundraisingCRM })));
 const InvestorsTab = React.lazy(() => import('./components/InvestorsTab').then(module => ({ default: module.InvestorsTab })));
 const ShortlistTab = React.lazy(() => import('./components/ShortlistTab').then(module => ({ default: module.ShortlistTab })));
@@ -169,7 +170,6 @@ function AppContent() {
                 currentUser={user}
               />
             )}
-            {activeTab === 'portfolio' && <PortfolioMonitoring companies={companies} onUpdateCompany={handleSaveCompany} />}
             {activeTab === 'fundraising' && <FundraisingCRM />}
             {activeTab === 'investors' && <InvestorsTab />}
             {activeTab === 'shortlist' && <ShortlistTab companies={companies} onCompanyClick={setSelectedCompany} onUpdateCompany={handleSaveCompany} />}
