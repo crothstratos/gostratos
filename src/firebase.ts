@@ -11,7 +11,21 @@ console.log('firebaseConfig:', firebaseConfig);
 
 export const app = initializeApp(firebaseConfig);
 export const storage = getStorage(app);
-const databaseId = (config as any).firestoreDatabaseId || "ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86";
+// The production database id, from the committed Firebase config.
+const PRODUCTION_DATABASE_ID =
+  (config as any).firestoreDatabaseId || "ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86";
+
+// Set VITE_FIRESTORE_DB=staging in .env.local to run the app against the
+// staging copy. Unset — which is every deployed build — means production.
+export const databaseId: string =
+  (import.meta as any).env?.VITE_FIRESTORE_DB || PRODUCTION_DATABASE_ID;
+
+export const isProductionData = databaseId === PRODUCTION_DATABASE_ID;
+
+if (!isProductionData) {
+  console.warn(`Running against the "${databaseId}" database, not production.`);
+}
+
 export const db = getFirestore(app, databaseId);
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();

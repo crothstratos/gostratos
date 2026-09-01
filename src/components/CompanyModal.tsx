@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Upload, FileText, Trash2, Printer, Clock, ChevronDown, ChevronUp, Wand2, Download, Bell, Calendar } from 'lucide-react';
-import { Company, STAGES, VERTICALS, TEAM_MEMBERS, Attachment, CalendarEvent, DealTermEntry } from '../types';
+import { Company, STAGES, VERTICALS, TEAM_MEMBERS, Attachment, CalendarEvent, DealTermEntry, Referrer } from '../types';
+import { ReferrerSelect } from './ReferrerSelect';
 import { v4 as uuidv4 } from 'uuid';
 import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db, storage } from '../firebase';
@@ -765,6 +766,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
     { name: 'vertical', label: 'Vertical', type: 'select', options: VERTICALS },
     { name: 'source', label: 'Internal Source', type: 'select', options: TEAM_MEMBERS },
     { name: 'externalSource', label: 'External Source', type: 'text' },
+    { name: 'referrers', label: 'Referred By', type: 'referrers' },
     { name: 'basics', label: 'Description', type: 'textarea' },
     { name: 'marketProblem', label: 'Market Problem', type: 'textarea' },
     { name: 'companySolution', label: 'Company Solution', type: 'textarea' },
@@ -1155,7 +1157,17 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
                       </button>
                     )}
                   </div>
-                  {field.type === 'textarea' ? (
+                  {field.type === 'referrers' ? (
+                    <ReferrerSelect
+                      value={(formData.referrers as Referrer[]) || []}
+                      onChange={(next) => setFormData(prev => prev ? { ...prev, referrers: next } : prev)}
+                      investorFirms={investors.map(i => ({
+                        id: i.id,
+                        firmName: i.firmName,
+                        contacts: (i.contacts || []).map(c => ({ name: (c as any).name, email: (c as any).email })),
+                      }))}
+                    />
+                  ) : field.type === 'textarea' ? (
                     <textarea
                       name={field.name}
                       value={(formData[field.name as keyof Company] as string) || ''}

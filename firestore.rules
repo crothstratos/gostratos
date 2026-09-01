@@ -54,7 +54,7 @@ service cloud.firestore {
     // fail with "Missing or insufficient permissions" on that collection.
     //
     // Collections in use: attachments, audit, companies, company_data_pool,
-    // events, investor_repository, investors.
+    // contacts, events, investor_repository, investors.
 
     match /companies/{id} {
       allow read, write: if hasAccess();
@@ -78,6 +78,15 @@ service cloud.firestore {
 
     match /company_data_pool/{id} {
       allow read, write: if hasAccess();
+    }
+
+    // The imported contacts directory. Readable by anyone authorised, but not
+    // writable from the browser: it is populated by scripts/import-contacts.cjs
+    // through the Admin SDK, which bypasses these rules. Nothing in the app
+    // needs to create or edit a contact, so nothing is permitted to.
+    match /contacts/{id} {
+      allow read: if hasAccess();
+      allow write: if false;
     }
 
     // Append-only, and this time it actually is: nothing else matches these

@@ -11,26 +11,44 @@
     "rewrites": [
       {
         "source": "/api/**",
-        "run": { "serviceId": "stratos-crm", "region": "us-central1" }
+        "run": {
+          "serviceId": "stratos-crm",
+          "region": "us-central1"
+        }
       },
-      { "source": "**", "destination": "/index.html" }
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
     ],
     "headers": [
       {
         "source": "/assets/**",
         "headers": [
-          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
         ]
       },
       {
         "source": "/index.html",
-        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ]
   },
   "firestore": [
     {
       "database": "ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "staging",
       "rules": "firestore.rules"
     }
   ],

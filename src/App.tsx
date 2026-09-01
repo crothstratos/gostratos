@@ -6,10 +6,12 @@ import { AuthProvider, useAuth } from './components/AuthContext';
 import { Company } from './types';
 import { LogIn, Loader2 } from 'lucide-react';
 import { useCompanies } from './hooks/useCompanies';
+import { databaseId, isProductionData } from './firebase';
 import { useEvents } from './hooks/useEvents';
 
 const KanbanBoard = React.lazy(() => import('./components/KanbanBoard').then(module => ({ default: module.KanbanBoard })));
 const StatsTab = React.lazy(() => import('./components/StatsTab').then(module => ({ default: module.StatsTab })));
+const ReferralsTab = React.lazy(() => import('./components/ReferralsTab').then(module => ({ default: module.ReferralsTab })));
 const DueDiligence = React.lazy(() => import('./components/DueDiligence').then(module => ({ default: module.DueDiligence })));
 const CalendarView = React.lazy(() => import('./components/CalendarView').then(module => ({ default: module.CalendarView })));
 // PortfolioMonitoring is intentionally not routed — see the note at the top
@@ -124,6 +126,14 @@ function AppContent() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 font-sans dark:bg-slate-950 dark:text-slate-100 transition-colors duration-200">
+      {/* Unmissable when the app is pointed at anything other than production.
+          The quickest way to cause an incident with a staging environment is
+          forgetting which one you are looking at. */}
+      {!isProductionData && (
+        <div className="fixed inset-x-0 top-0 z-[100] bg-amber-500 px-4 py-1 text-center text-[12px] font-semibold text-amber-950">
+          NOT PRODUCTION — connected to the "{databaseId}" database. Changes here do not affect the live CRM.
+        </div>
+      )}
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -160,6 +170,7 @@ function AppContent() {
               />
             )}
             {activeTab === 'stats' && <StatsTab companies={companies} onNavigateToCRM={() => setActiveTab('crm')} />}
+            {activeTab === 'referrals' && <ReferralsTab companies={companies} onCompanyClick={setSelectedCompany} />}
             {activeTab === 'dd' && <DueDiligence companies={companies} onUpdateCompany={handleSaveCompany} />}
             {activeTab === 'calendar' && (
               <CalendarView

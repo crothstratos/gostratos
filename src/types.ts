@@ -245,6 +245,8 @@ export interface Company {
   vertical?: Vertical;
   source?: string;
   externalSource?: string;
+  /** Structured referrers. See the Referrer type. */
+  referrers?: Referrer[];
   stage: Stage;
   basics: string;
   marketProblem: string;
@@ -297,4 +299,32 @@ export interface Company {
   targetCloseDate?: string;
   probabilityOfClose?: number;
   investmentAmount?: number;
+}
+
+/** A person from the imported contacts directory. */
+export interface Contact {
+  id: string;
+  name: string;
+  nameLower: string;
+  firstName?: string;
+  lastName?: string;
+  emails: string[];
+  city?: string;
+  state?: string;
+  source?: string;
+  importedAt?: string;
+}
+
+/**
+ * Who referred a company to us. Stored on the company alongside the original
+ * free-text externalSource, which is left untouched — this is additive, so
+ * nothing anyone typed before is lost.
+ */
+export interface Referrer {
+  id: string;
+  name: string;
+  kind: 'contact' | 'investorFirm' | 'investorContact';
+  email?: string;
+  /** For a person attached to a firm, the firm they belong to. */
+  firmName?: string;
 }
