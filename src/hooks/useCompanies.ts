@@ -212,9 +212,13 @@ export function useCompanies(user: any) {
       finalCompany.funds = Array.from(new Set([...(finalCompany.funds || []), 'Arkansas']));
     }
 
+    // Keep the flat referrer id mirror in step with the rich array. This is
+    // what makes the reverse lookup possible — see Company.referrerIds.
+    const referrerIds = (finalCompany.referrers || []).map(r => r.id);
+
     // Remove undefined values to prevent Firestore errors
     const cleanCompany = Object.fromEntries(
-      Object.entries({ ...finalCompany, updatedBy: user?.email || 'unknown' })
+      Object.entries({ ...finalCompany, referrerIds, updatedBy: user?.email || 'unknown' })
         .filter(([_, v]) => v !== undefined)
     );
 

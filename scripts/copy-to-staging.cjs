@@ -16,6 +16,7 @@
  *
  *   node scripts/copy-to-staging.cjs --dry-run    (count only, writes nothing)
  *   node scripts/copy-to-staging.cjs --verify     (compare both sides, writes nothing)
+ *   node scripts/copy-to-staging.cjs --discover   (list what is REALLY in each database)
  */
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
@@ -37,6 +38,7 @@ const COLLECTIONS = [
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
+const DISCOVER = process.argv.includes('--discover');
 const BATCH_SIZE = 400; // Firestore caps a batch at 500 writes.
 
 // Guard rail: never let this write into production, whatever gets edited above.
@@ -102,6 +104,27 @@ async function copyCollection(source, target, name) {
   const app = initializeApp({ credential: applicationDefault(), projectId: PROJECT_ID });
   const source = getFirestore(app, SOURCE_DB);
   const target = getFirestore(app, TARGET_DB);
+
+  // Asks the databases what they contain rather than trusting the list above.
+  // The list was originally derived by reading the application code, which
+  // missed a collection the app no longer references but that still exists.
+  if (DISCOVER) {
+    for (const [label, database] of [['PRODUCTION', source], ['STAGING', target]]) {
+      const found = await database.listCollections();
+      console.log(`\n  ${label}`);
+      if (!found.length) { console.log('    (no collections)'); continue; }
+      for (const ref of found) {
+        const c = await ref.count().get();
+        const known = COLLECTIONS.includes(ref.id);
+        console.log(
+          `    ${ref.id.padEnd(24)} ${String(c.data().count).padStart(7)}` +
+          (known ? '' : '   <-- NOT in this script\'s collection list')
+        );
+      }
+    }
+    console.log('');
+    process.exit(0);
+  }
 
   if (VERIFY) {
     console.log('  collection            production    staging   match');

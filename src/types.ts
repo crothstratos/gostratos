@@ -247,6 +247,14 @@ export interface Company {
   externalSource?: string;
   /** Structured referrers. See the Referrer type. */
   referrers?: Referrer[];
+  /**
+   * Flat mirror of referrers[].id, maintained on save.
+   * Firestore's array-contains matches whole array elements, so it cannot
+   * look inside the objects in referrers[]. Without this field there is no
+   * way to ask "which companies did this person refer?" — only the forward
+   * direction works. Derived data: never edit it by hand.
+   */
+  referrerIds?: string[];
   stage: Stage;
   basics: string;
   marketProblem: string;
@@ -311,6 +319,8 @@ export interface Contact {
   emails: string[];
   city?: string;
   state?: string;
+  /** Who they are with — firm, fund, company. Free text, set on quick-add. */
+  affiliation?: string;
   source?: string;
   importedAt?: string;
 }

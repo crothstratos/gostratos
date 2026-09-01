@@ -80,13 +80,17 @@ service cloud.firestore {
       allow read, write: if hasAccess();
     }
 
-    // The imported contacts directory. Readable by anyone authorised, but not
-    // writable from the browser: it is populated by scripts/import-contacts.cjs
-    // through the Admin SDK, which bypasses these rules. Nothing in the app
-    // needs to create or edit a contact, so nothing is permitted to.
+    // The contacts directory. Bulk-loaded by scripts/import-contacts.cjs
+    // through the Admin SDK, which bypasses these rules, and added to one at a
+    // time from the app's quick-add.
+    //
+    // Delete stays closed. A contact id is referenced from every company that
+    // person referred (Company.referrerIds), and Firestore has no foreign keys
+    // to notice — deleting one from the browser would leave those references
+    // pointing at nothing, with no warning and no undo.
     match /contacts/{id} {
-      allow read: if hasAccess();
-      allow write: if false;
+      allow read, create, update: if hasAccess();
+      allow delete: if false;
     }
 
     // Append-only, and this time it actually is: nothing else matches these

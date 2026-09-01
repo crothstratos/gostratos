@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Upload, FileText, Trash2, Printer, Clock, ChevronDown, ChevronUp, Wand2, Download, Bell, Calendar } from 'lucide-react';
 import { Company, STAGES, VERTICALS, TEAM_MEMBERS, Attachment, CalendarEvent, DealTermEntry, Referrer } from '../types';
 import { ReferrerSelect } from './ReferrerSelect';
+import { PersonProfile } from './PersonProfile';
 import { v4 as uuidv4 } from 'uuid';
 import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db, storage } from '../firebase';
@@ -34,6 +35,10 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
   const { investors } = useInvestors();
   const [formData, setFormData] = useState<Company | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // A referrer chip was clicked. Opens their profile over this modal; no
+  // onCompanyClick is passed down, so following a company from there cannot
+  // swap this modal out from under unsaved edits.
+  const [personId, setPersonId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [notes, setNotes] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -1161,6 +1166,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
                     <ReferrerSelect
                       value={(formData.referrers as Referrer[]) || []}
                       onChange={(next) => setFormData(prev => prev ? { ...prev, referrers: next } : prev)}
+                      onPersonClick={setPersonId}
                       investorFirms={investors.map(i => ({
                         id: i.id,
                         firmName: i.firmName,
@@ -2047,6 +2053,10 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
             </div>
           </div>
         </div>
+      )}
+
+      {personId && (
+        <PersonProfile contactId={personId} onClose={() => setPersonId(null)} />
       )}
     </div>
   );

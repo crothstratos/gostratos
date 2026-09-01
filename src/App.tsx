@@ -12,6 +12,7 @@ import { useEvents } from './hooks/useEvents';
 const KanbanBoard = React.lazy(() => import('./components/KanbanBoard').then(module => ({ default: module.KanbanBoard })));
 const StatsTab = React.lazy(() => import('./components/StatsTab').then(module => ({ default: module.StatsTab })));
 const ReferralsTab = React.lazy(() => import('./components/ReferralsTab').then(module => ({ default: module.ReferralsTab })));
+const PeopleTab = React.lazy(() => import('./components/PeopleTab').then(module => ({ default: module.PeopleTab })));
 const DueDiligence = React.lazy(() => import('./components/DueDiligence').then(module => ({ default: module.DueDiligence })));
 const CalendarView = React.lazy(() => import('./components/CalendarView').then(module => ({ default: module.CalendarView })));
 // PortfolioMonitoring is intentionally not routed — see the note at the top
@@ -171,6 +172,7 @@ function AppContent() {
             )}
             {activeTab === 'stats' && <StatsTab companies={companies} onNavigateToCRM={() => setActiveTab('crm')} />}
             {activeTab === 'referrals' && <ReferralsTab companies={companies} onCompanyClick={setSelectedCompany} />}
+            {activeTab === 'people' && <PeopleTab onCompanyClick={setSelectedCompany} />}
             {activeTab === 'dd' && <DueDiligence companies={companies} onUpdateCompany={handleSaveCompany} />}
             {activeTab === 'calendar' && (
               <CalendarView
