@@ -47,61 +47,61 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
           <button
             onClick={() => { setActiveTab('crm'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'crm' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'crm' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <LayoutDashboard size={18} className={activeTab === 'crm' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <LayoutDashboard size={16} className={activeTab === 'crm' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Companies
           </button>
           <button
             onClick={() => { setActiveTab('stats'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'stats' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'stats' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <LineChart size={18} className={activeTab === 'stats' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <LineChart size={16} className={activeTab === 'stats' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Stats
           </button>
           <button
             onClick={() => { setActiveTab('shortlist'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'shortlist' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'shortlist' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <Star size={18} className={activeTab === 'shortlist' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <Star size={16} className={activeTab === 'shortlist' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Shortlist
           </button>
           <button
             onClick={() => { setActiveTab('search'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'search' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'search' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <SearchCode size={18} className={activeTab === 'search' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <SearchCode size={16} className={activeTab === 'search' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Search
           </button>
           <button
             onClick={() => { setActiveTab('dd'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'dd' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'dd' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <FileSearch size={18} className={activeTab === 'dd' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <FileSearch size={16} className={activeTab === 'dd' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Due Diligence (DD)
           </button>
           <button
             onClick={() => { setActiveTab('calendar'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'calendar' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'calendar' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <CalendarIcon size={18} className={activeTab === 'calendar' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <CalendarIcon size={16} className={activeTab === 'calendar' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Calendar
           </button>
           {/* Portfolio Monitoring is hidden until it runs on real data. The
@@ -110,21 +110,21 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
           <button
             onClick={() => { setActiveTab('fundraising'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'fundraising' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'fundraising' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <Users size={18} className={activeTab === 'fundraising' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <Users size={16} className={activeTab === 'fundraising' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Fundraising
           </button>
           <button
             onClick={() => { setActiveTab('investors'); setIsOpen(false); }}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.925rem] font-medium transition-all duration-300",
-              activeTab === 'investors' ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/50 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700/50" : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'investors' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
-            <Briefcase size={18} className={activeTab === 'investors' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            <Briefcase size={16} className={activeTab === 'investors' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Investors
           </button>
         </nav>
@@ -149,7 +149,7 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
             onClick={toggleTheme}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-white hover:shadow-sm hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 transition-all duration-200"
           >
-            {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+            {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
             {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
           </button>
           {user && (
@@ -157,7 +157,7 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
               onClick={logout}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 hover:shadow-sm dark:text-red-400 dark:hover:bg-red-900/20 transition-all duration-200"
             >
-              <LogOut size={18} />
+              <LogOut size={16} />
               Sign Out
             </button>
           )}

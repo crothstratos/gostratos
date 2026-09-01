@@ -35,7 +35,7 @@ export const Header = React.memo(function Header({
         >
           <Menu size={20} />
         </button>
-        <h2 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white truncate max-w-[120px] sm:max-w-xs md:max-w-none">
+        <h2 className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-white truncate max-w-[140px] sm:max-w-xs md:max-w-none">
           {activeTab === 'crm' && 'Companies'}
           {activeTab === 'dd' && 'Due Diligence (DD)'}
           {activeTab === 'calendar' && 'Events Calendar'}
