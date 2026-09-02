@@ -58,7 +58,8 @@ export function useFirmScan() {
         people: (data.people || []).map((p: any) => ({
           name: p.name,
           role: p.role,
-          linkedin: p.linkedin,
+          email: p.email,
+          emailSourceUrl: p.emailSourceUrl,
           source: p.source === 'website' ? ('website' as const) : ('search' as const),
           sourceUrl: p.sourceUrl,
           status: 'pending' as const,

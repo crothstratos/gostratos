@@ -246,6 +246,16 @@ Return the information strictly as a JSON object matching this schema:
         .map((p) => `--- PAGE: ${p.url} ---\n${p.text}`)
         .join("\n\n");
 
+      // Every address printed anywhere on the pages we read. The model may
+      // only pick from this list; it may not compose one.
+      const siteEmails = [...new Set(pages.flatMap((p) => p.emails))];
+      const emailByAddress = new Map<string, string>();
+      for (const page of pages) {
+        for (const address of page.emails) {
+          if (!emailByAddress.has(address)) emailByAddress.set(address, page.url);
+        }
+      }
+
       const subject = firmName
         ? `the venture capital firm "${firmName}"${url ? ` (website: ${url})` : ""}`
         : `the venture capital firm at ${url}`;
@@ -259,6 +269,19 @@ it is current, and it is the firm describing itself.
 For every person whose name appears in this text, set source to "website" and
 sourceUrl to the PAGE url they appeared on. Do not set source to "website" for
 anyone who is not named in the text below.
+
+${
+  siteEmails.length
+    ? `These email addresses were found printed on those pages:
+${siteEmails.join("\n")}
+
+If one of them clearly belongs to a specific person you are listing, put it in
+that person's email field, copied EXACTLY. If you are not sure whose it is,
+leave the person's email empty. Never write an address that is not on this
+list, even if the pattern seems obvious.`
+    : `No email addresses were found on those pages, so leave every person's
+email field empty.`
+}
 
 ${siteText}
 `
@@ -274,17 +297,18 @@ ${sourceSection}
 
 Report:
 1. The people who work at the firm — investment team, partners, principals,
-   operating partners. Give name, job title, LinkedIn URL if you find one, and
-   which source the person came from.
+   operating partners. Give name, job title, which source the person came
+   from, and their email ONLY if it is in the list of addresses above.
 2. Their portfolio companies, named as the company names itself, with a brief
    note of where you saw each listed.
 3. The firm's headquarters city.
 
 Rules, which matter more than completeness:
-- Do NOT return an email address for anyone, under any circumstances, even if
-  one appears in the page text. There is no email field in the output.
-- Do NOT guess. If you are not confident a person currently works there, or
-  that a company is in their portfolio, leave it out.
+- NEVER invent or infer an email address. Do not derive one from a pattern you
+  notice in the other addresses. Copy exactly from the supplied list or leave
+  the field empty. An address that looks right but is wrong is worse than none.
+- Do NOT guess at anything else either. If you are not confident a person
+  currently works there, or that a company is in their portfolio, leave it out.
 - Do not include people who have left the firm.
 - Prefer the website text over your own recollection wherever they disagree.
 - If you cannot find reliable information, return empty arrays. Returning
@@ -318,7 +342,10 @@ Rules, which matter more than completeness:
                   properties: {
                     name: { type: Type.STRING },
                     role: { type: Type.STRING },
-                    linkedin: { type: Type.STRING },
+                    email: {
+                      type: Type.STRING,
+                      description: "Only an address copied exactly from the supplied list. Never composed.",
+                    },
                     source: {
                       type: Type.STRING,
                       description: "'website' if named in the supplied page text, otherwise 'search'",
@@ -368,10 +395,19 @@ Rules, which matter more than completeness:
           // Named in text we actually fetched. Not proof of employment, but it
           // is proof the firm's own site says so, which is the claim being made.
           const verified = pages.length > 0 && pageText.includes(name.toLowerCase());
+
+          // The address must be one we read off the page. The prompt says so
+          // too, but a prompt is a request and this is the enforcement: a model
+          // that helpfully constructs first.last@firm.com gets it dropped here,
+          // silently and every time.
+          const claimedEmail = p.email ? String(p.email).trim().toLowerCase() : "";
+          const emailIsReal = claimedEmail !== "" && emailByAddress.has(claimedEmail);
+
           return {
             name,
             role: p.role ? String(p.role).trim() : undefined,
-            linkedin: p.linkedin ? String(p.linkedin).trim() : undefined,
+            email: emailIsReal ? claimedEmail : undefined,
+            emailSourceUrl: emailIsReal ? emailByAddress.get(claimedEmail) : undefined,
             source: verified ? "website" : "search",
             sourceUrl: verified && pageUrls.has(claimedUrl) ? claimedUrl : undefined,
           };
@@ -407,6 +443,144 @@ Rules, which matter more than completeness:
     } catch (error) {
       console.error("Error scanning investor firm:", error);
       res.status(500).json({ error: "Failed to scan firm" });
+    }
+  });
+
+  /**
+   * Who does this firm invest alongside?
+   *
+   * Answers it from actual rounds — "both were in Acme's Series A" — rather
+   * than from thematic similarity, because a firm that merely looks similar is
+   * not a warm introduction and a firm that has shared three cap tables is.
+   * Each recommendation comes back with enough of a profile to judge it
+   * without leaving the page, and with the deals that justify it, so a
+   * suggestion can be checked rather than taken on faith.
+   */
+  app.post("/api/discover-firm-coinvestors", async (req, res) => {
+    try {
+      const { firmName, website, portfolioCompanies, knownFirms } = req.body;
+      if (!firmName) {
+        return res.status(400).json({ error: "A firm name is required." });
+      }
+      const ai = getGeminiAI();
+
+      const portfolio = Array.isArray(portfolioCompanies) ? portfolioCompanies.slice(0, 60) : [];
+      const known = Array.isArray(knownFirms) ? knownFirms.slice(0, 200) : [];
+
+      const prompt = `
+You are a VC research analyst. Using web search, research which other investors
+have participated in the same funding rounds as ${firmName}${website ? ` (${website})` : ""}.
+
+${
+  portfolio.length
+    ? `These are companies we believe ${firmName} has backed. Look at the rounds
+in these companies in particular:
+${portfolio.join(", ")}`
+    : `Start by finding the companies ${firmName} has backed, then look at who
+else was in those rounds.`
+}
+
+For each co-investor you can evidence, report:
+- Their firm name.
+- A one-or-two sentence description of what they do.
+- The stages they invest at (e.g. "Pre-seed, Seed").
+- Their typical check size, if reported anywhere.
+- The sectors they focus on.
+- Their website.
+- Which specific companies they and ${firmName} were both investors in. This is
+  the evidence for the recommendation, so it must be real.
+- How many of those shared deals you found.
+
+Rules:
+- Only list a firm where you can name at least one company both invested in. A
+  firm that merely looks similar is not a co-investor and is not useful here.
+- Do NOT invent shared deals. If you cannot name the company, leave the firm out.
+- Prefer firms with more shared deals, and list at most 12.
+- If you cannot evidence any co-investors, return an empty array. That is a
+  valid answer.
+`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              coInvestors: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    firmName: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    stages: { type: Type.STRING },
+                    checkSize: { type: Type.STRING },
+                    sectors: { type: Type.STRING },
+                    website: { type: Type.STRING },
+                    sharedDeals: {
+                      type: Type.ARRAY,
+                      description: "Companies both firms invested in. Must be real and nameable.",
+                      items: { type: Type.STRING },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      let text = response.text || "{}";
+      text = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
+
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        console.error("discover-firm-coinvestors: JSON parsing error. Raw response:", text);
+        throw err;
+      }
+
+      const normalise = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const knownSet = new Set(known.map((k: any) => normalise(String(k))));
+      const selfKey = normalise(String(firmName));
+
+      const raw = Array.isArray(data.coInvestors) ? data.coInvestors : [];
+      const seen = new Set<string>();
+
+      const cleaned = raw
+        .filter((c: any) => c && typeof c.firmName === "string" && c.firmName.trim() !== "")
+        .map((c: any) => ({
+          firmName: String(c.firmName).trim(),
+          description: c.description ? String(c.description).trim() : undefined,
+          stages: c.stages ? String(c.stages).trim() : undefined,
+          checkSize: c.checkSize ? String(c.checkSize).trim() : undefined,
+          sectors: c.sectors ? String(c.sectors).trim() : undefined,
+          website: c.website ? String(c.website).trim() : undefined,
+          sharedDeals: Array.isArray(c.sharedDeals)
+            ? c.sharedDeals.filter((d: any) => typeof d === "string" && d.trim() !== "").map((d: string) => d.trim())
+            : [],
+        }))
+        // The whole premise is a shared cap table. No named deal, no entry —
+        // otherwise this degrades into a list of firms that sound alike.
+        .filter((c: any) => c.sharedDeals.length > 0)
+        .filter((c: any) => {
+          const key = normalise(c.firmName);
+          if (key === selfKey || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((c: any) => ({ ...c, alreadyInRepository: knownSet.has(normalise(c.firmName)) }))
+        .sort((a: any, b: any) => b.sharedDeals.length - a.sharedDeals.length)
+        .slice(0, 12);
+
+      res.json({ coInvestors: cleaned });
+    } catch (error) {
+      console.error("Error discovering firm co-investors:", error);
+      res.status(500).json({ error: "Failed to research co-investors" });
     }
   });
 

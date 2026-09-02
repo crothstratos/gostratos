@@ -43,6 +43,53 @@ const TEAM_HINTS: { word: string; weight: number }[] = [
 export interface FetchedPage {
   url: string;
   text: string;
+  /** Addresses literally present on this page. See extractEmails. */
+  emails: string[];
+}
+
+/**
+ * Inboxes that belong to a firm, not a person. Attaching info@ to a partner
+ * would look like a personal address and get used as one.
+ */
+const ROLE_INBOXES = [
+  'info', 'contact', 'hello', 'hi', 'admin', 'support', 'help', 'team',
+  'office', 'press', 'media', 'careers', 'jobs', 'recruiting', 'legal',
+  'privacy', 'security', 'sales', 'marketing', 'general', 'enquiries',
+  'inquiries', 'submissions', 'pitch', 'pitches', 'deals', 'ir', 'noreply',
+  'no-reply', 'donotreply', 'webmaster', 'postmaster', 'abuse',
+];
+
+/**
+ * Pulls email addresses out of a page, from mailto: links and from body text.
+ *
+ * This is the only way an address is allowed to reach the CRM. A model asked
+ * for someone's email will compose one that fits the firm's pattern and looks
+ * completely right, and a wrong address that looks right is the error nobody
+ * catches until mail has already gone out. An address that is literally
+ * printed on the firm's own team page is a fact we read, not a guess.
+ */
+export function extractEmails(html: string): string[] {
+  const found = new Set<string>();
+
+  // mailto: links first — the least ambiguous form.
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+)/gi)) {
+    const value = decodeURIComponent(m[1]).trim().toLowerCase();
+    if (value.includes('@')) found.add(value);
+  }
+
+  // Then addresses printed as text.
+  const text = htmlToText(html);
+  for (const m of text.matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)) {
+    found.add(m[0].trim().toLowerCase());
+  }
+
+  return [...found].filter(address => {
+    const local = address.split('@')[0];
+    if (ROLE_INBOXES.includes(local)) return false;
+    // Tracking pixels and asset filenames sometimes match the pattern.
+    if (/\.(png|jpe?g|gif|svg|webp|css|js)$/i.test(address)) return false;
+    return address.length <= 254;
+  });
 }
 
 /**
@@ -173,12 +220,18 @@ export async function fetchFirmPages(website: string): Promise<FetchedPage[]> {
   const homeHtml = await fetchText(root);
   if (!homeHtml) return [];
 
-  const pages: FetchedPage[] = [{ url: root, text: htmlToText(homeHtml).slice(0, MAX_TEXT_PER_PAGE) }];
+  const pages: FetchedPage[] = [{
+    url: root,
+    text: htmlToText(homeHtml).slice(0, MAX_TEXT_PER_PAGE),
+    emails: extractEmails(homeHtml),
+  }];
 
   const links = findTeamLinks(homeHtml, root);
   const fetched = await Promise.all(links.map(async link => {
     const html = await fetchText(link);
-    return html ? { url: link, text: htmlToText(html).slice(0, MAX_TEXT_PER_PAGE) } : null;
+    return html
+      ? { url: link, text: htmlToText(html).slice(0, MAX_TEXT_PER_PAGE), emails: extractEmails(html) }
+      : null;
   }));
 
   for (const page of fetched) if (page) pages.push(page);

@@ -198,6 +198,8 @@ export interface InvestorContact {
   provenance?: Provenance;
   /** For accepted suggestions: the page the name was found on, if any. */
   sourceUrl?: string;
+  /** For accepted suggestions: the page the email was printed on, if any. */
+  emailSourceUrl?: string;
   /** Who accepted this from a scan suggestion, and when. */
   confirmedBy?: string;
   confirmedAt?: string;
@@ -229,15 +231,18 @@ export interface PortfolioSuggestion {
 /**
  * Someone a scan believes works at this firm, awaiting review.
  *
- * There is deliberately no email field. A model asked for a colleague's
- * address will invent a plausible one, and an invented address that looks
- * right is the kind of error that only surfaces after someone sends to it.
- * Names and roles can be checked at a glance; addresses cannot.
+ * An email only ever appears here when that exact address was printed on a
+ * page the server actually fetched — never one a model composed from the
+ * pattern of the others. That check is enforced server-side, because an
+ * address that looks right but is wrong is the error nobody catches until
+ * mail has already gone out.
  */
 export interface PersonSuggestion {
   name: string;
   role?: string;
-  linkedin?: string;
+  email?: string;
+  /** The page the address was printed on. Present whenever email is. */
+  emailSourceUrl?: string;
   status: SuggestionStatus;
   foundAt: string;
   /**
@@ -248,6 +253,19 @@ export interface PersonSuggestion {
    */
   source?: 'website' | 'search';
   sourceUrl?: string;
+}
+
+/** A firm that has shared a cap table with one of ours. */
+export interface CoInvestorSuggestion {
+  firmName: string;
+  description?: string;
+  stages?: string;
+  checkSize?: string;
+  sectors?: string;
+  website?: string;
+  /** Companies both firms backed. The evidence; never empty. */
+  sharedDeals: string[];
+  alreadyInRepository?: boolean;
 }
 
 export interface InvestorRepositoryEntry {

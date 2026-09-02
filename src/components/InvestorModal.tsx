@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { InvestorRepositoryEntry, Company, PortfolioSuggestion, PersonSuggestion } from '../types';
+import { InvestorRepositoryEntry, Company, PortfolioSuggestion, PersonSuggestion, InvestorContact, CoInvestorSuggestion } from '../types';
 import { Plus, X, Building2, Globe, MapPin, Edit2, Check, DollarSign, Target, Briefcase, Mail, Phone, ExternalLink, Clock, Trash2, Wand2, Sparkles, ArrowUpRight } from 'lucide-react';
 import { LocationInput } from './LocationInput';
 import { cn } from '../utils';
@@ -7,7 +7,16 @@ import { useCompanies } from '../hooks/useCompanies';
 import { useFirmScan } from '../hooks/useFirmScan';
 import { buildCompanyIndex, lookupCompany } from '../companyMatch';
 import { SuggestionPanel, SuggestionRow } from './SuggestionReview';
+import { FirmPersonCard } from './FirmPersonCard';
+import { CoInvestorPanel } from './CoInvestorPanel';
 import { useAuth } from './AuthContext';
+
+const TAB_LABELS = {
+  profile: 'Overview',
+  portfolio: 'Portfolio Companies',
+  people: 'Team & Contacts',
+  coinvestors: 'Co-Investors',
+} as const;
 
 interface InvestorModalProps {
   investor: InvestorRepositoryEntry | null;
@@ -16,14 +25,25 @@ interface InvestorModalProps {
   isNew?: boolean;
   /** Opens a portfolio company's profile. Without it, names stay plain text. */
   onCompanyClick?: (company: Company) => void;
+  /**
+   * Every firm in the repository, for cross-referencing people and for
+   * spotting co-investors we already track. Passed down rather than
+   * re-subscribed here: the tab behind this modal already holds the list.
+   */
+  allFirms?: InvestorRepositoryEntry[];
+  /** Files a recommended co-investor as a new repository entry. */
+  onAddFirm?: (entry: Partial<InvestorRepositoryEntry>) => void;
 }
 
-export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew, onCompanyClick }: InvestorModalProps) {
+export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew, onCompanyClick, allFirms = [], onAddFirm }: InvestorModalProps) {
   const { user } = useAuth();
   const { companies } = useCompanies(user);
   const [isEditing, setIsEditing] = useState(isNew || false);
   const [formData, setFormData] = useState<Partial<InvestorRepositoryEntry>>(investor || {});
-  const [activeTab, setActiveTab] = useState<'profile' | 'portfolio' | 'people'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'portfolio' | 'people' | 'coinvestors'>('profile');
+  // Which person's card is open, by contact id.
+  const [openPersonId, setOpenPersonId] = useState<string | null>(null);
+
 
   const { scanFirm, isScanning: isResearching, error: scanError, setError: setScanError } = useFirmScan();
   // Which pages the last scan managed to read. Session-only: it describes this
@@ -140,10 +160,10 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                 id: crypto.randomUUID(),
                 name: suggestion.name,
                 role: suggestion.role || '',
-                linkedin: suggestion.linkedin || '',
-                // Blank, and deliberately so: the scan is not allowed to
-                // return an address, and an invented one is worse than none.
-                email: '',
+                // Only ever an address printed on a page the server read. If
+                // none was found this stays blank rather than being guessed.
+                email: suggestion.email || '',
+                emailSourceUrl: suggestion.emailSourceUrl,
                 phone: '',
                 provenance: 'ai-confirmed' as const,
                 sourceUrl: suggestion.sourceUrl,
@@ -156,6 +176,39 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
   };
 
   const acceptAllCompanies = () => pendingCompanies.forEach(c => decideCompany(c.name, 'accepted'));
+
+  const openPerson: InvestorContact | undefined =
+    (formData.contacts || []).find(c => c.id === openPersonId);
+
+  /**
+   * Files a recommended co-investor as a new repository entry.
+   *
+   * It lands as a normal record rather than a suggestion because the person
+   * clicking Add has just read the card, including the shared deals that
+   * justify it — that click is the review step.
+   */
+  const handleAddCoInvestor = (suggestion: CoInvestorSuggestion) => {
+    if (!onAddFirm) return;
+    onAddFirm({
+      firmName: suggestion.firmName,
+      website: suggestion.website || '',
+      investmentStage: suggestion.stages || '',
+      checkSize: suggestion.checkSize || '',
+      verticals: suggestion.sectors || '',
+      notes: [
+        suggestion.description,
+        `Found as a co-investor of ${formData.firmName || 'another firm'}.`,
+        `Shared deals: ${suggestion.sharedDeals.join(', ')}.`,
+      ].filter(Boolean).join(' '),
+      contactName: '',
+      contactEmail: '',
+      contactPhone: '',
+      fundDetails: '',
+      portfolioCompanies: suggestion.sharedDeals,
+      createdBy: user?.email || 'unknown',
+      lastModified: new Date().toISOString(),
+    } as any);
+  };
 
   const handleSaveForm = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -220,7 +273,7 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
 
         {/* Tabs */}
         <div className="flex border-b border-slate-100 dark:border-slate-800 px-6">
-          {(['profile', 'portfolio', 'people'] as const).map(tab => (
+          {(['profile', 'portfolio', 'people', 'coinvestors'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -231,7 +284,7 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                   : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-300"
               )}
             >
-              {tab === 'profile' ? 'Overview' : tab === 'portfolio' ? 'Portfolio Companies' : 'Team & Contacts'}
+              {TAB_LABELS[tab]}
             </button>
           ))}
         </div>
@@ -680,8 +733,7 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                       <SuggestionRow
                         key={person.name}
                         primary={person.name}
-                        secondary={person.role}
-                        link={person.linkedin}
+                        secondary={[person.role, person.email].filter(Boolean).join(' · ')}
                         source={person.source}
                         sourceUrl={person.sourceUrl}
                         onAccept={() => decidePerson(person, 'accepted')}
@@ -809,7 +861,14 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                           </div>
                         </div>
                       ) : (
-                        <div key={contact.id} className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
+                        <div
+                          key={contact.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setOpenPersonId(contact.id)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenPersonId(contact.id); } }}
+                          className="cursor-pointer bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-all hover:-translate-y-px hover:border-indigo-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:hover:border-indigo-500/40"
+                        >
                           <div className="mb-1 flex items-start gap-2">
                             <h4 className="flex-1 font-semibold text-slate-900 dark:text-white text-base">{contact.name || 'Unnamed Contact'}</h4>
                             {contact.provenance === 'ai-confirmed' && (
@@ -822,27 +881,17 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                             )}
                           </div>
                           {contact.role && <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 mb-4">{contact.role}</p>}
-                          {contact.linkedin && (
-                            <a
-                              href={contact.linkedin}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-indigo-600 dark:text-slate-300"
-                            >
-                              <ExternalLink size={14} className="text-slate-400" /> LinkedIn
-                            </a>
-                          )}
                           <div className="space-y-2">
                             {contact.email && (
                               <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                                 <Mail size={14} className="text-slate-400" />
-                                <a href={`mailto:${contact.email}`} className="hover:text-indigo-600 transition-colors truncate">{contact.email}</a>
+                                <a href={`mailto:${contact.email}`} onClick={e => e.stopPropagation()} className="hover:text-indigo-600 transition-colors truncate">{contact.email}</a>
                               </div>
                             )}
                             {contact.phone && (
                               <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                                 <Phone size={14} className="text-slate-400" />
-                                <a href={`tel:${contact.phone}`} className="hover:text-indigo-600 transition-colors">{contact.phone}</a>
+                                <a href={`tel:${contact.phone}`} onClick={e => e.stopPropagation()} className="hover:text-indigo-600 transition-colors">{contact.phone}</a>
                               </div>
                             )}
                           </div>
@@ -857,6 +906,14 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                   </div>
                 )}
               </div>
+            )}
+
+            {activeTab === 'coinvestors' && (
+              <CoInvestorPanel
+                firm={formData}
+                allFirms={allFirms}
+                onAdd={handleAddCoInvestor}
+              />
             )}
           </form>
         </div>
@@ -881,6 +938,16 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
           </div>
         )}
       </div>
+
+      {openPerson && (
+        <FirmPersonCard
+          contact={openPerson}
+          firm={formData as InvestorRepositoryEntry}
+          firms={allFirms}
+          onClose={() => setOpenPersonId(null)}
+          onCompanyClick={onCompanyClick}
+        />
+      )}
     </div>
   );
 });
