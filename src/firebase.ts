@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
@@ -26,7 +26,16 @@ if (!isProductionData) {
   console.warn(`Running against the "${databaseId}" database, not production.`);
 }
 
-export const db = getFirestore(app, databaseId);
+/**
+ * ignoreUndefinedProperties is not a nicety — without it Firestore throws on
+ * any undefined value at any depth, and the hooks only strip undefined at the
+ * top level of a document. Anything optional nested inside an array therefore
+ * blew up on save: a referrer with no email address (Referrer.email is
+ * undefined for a contact with no address on file) failed to write, and so
+ * would a scan suggestion with no job title. The setting makes an undefined
+ * field mean "absent", which is what every optional field in types.ts means.
+ */
+export const db = initializeFirestore(app, { ignoreUndefinedProperties: true }, databaseId);
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();
 // BigQuery scope removed: nothing in the app calls BigQuery, and requesting

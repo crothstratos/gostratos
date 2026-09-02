@@ -15,6 +15,8 @@ export interface FirmScanResult {
   companies: PortfolioSuggestion[];
   people: PersonSuggestion[];
   location?: string;
+  /** Pages actually read from the firm's site. Empty means search-only. */
+  pagesRead: string[];
 }
 
 export function useFirmScan() {
@@ -57,10 +59,13 @@ export function useFirmScan() {
           name: p.name,
           role: p.role,
           linkedin: p.linkedin,
+          source: p.source === 'website' ? ('website' as const) : ('search' as const),
+          sourceUrl: p.sourceUrl,
           status: 'pending' as const,
           foundAt,
         })),
         location: data.location,
+        pagesRead: Array.isArray(data.pagesRead) ? data.pagesRead : [],
       };
     } catch (err: any) {
       const message = err.message || 'Unknown error';

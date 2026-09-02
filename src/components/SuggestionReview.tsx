@@ -16,16 +16,39 @@ export interface SuggestionRowProps {
   primary: string;
   secondary?: string;
   link?: string;
+  /** Where this came from. 'website' is verified against fetched page text. */
+  source?: 'website' | 'search';
+  sourceUrl?: string;
   onAccept: () => void;
   onDismiss: () => void;
 }
 
-function Row({ primary, secondary, link, onAccept, onDismiss }: SuggestionRowProps) {
+function Row({ primary, secondary, link, source, sourceUrl, onAccept, onDismiss }: SuggestionRowProps) {
   return (
     <div className="flex items-center gap-3 rounded-lg border border-violet-200 bg-white px-3 py-2 dark:border-violet-500/25 dark:bg-slate-900">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-[13.5px] font-medium text-slate-900 dark:text-white">{primary}</span>
+          {source === 'website' && (
+            <a
+              href={sourceUrl || undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title={sourceUrl ? `Named on ${sourceUrl}` : "Named on the firm's own site"}
+              className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400"
+            >
+              On site
+            </a>
+          )}
+          {source === 'search' && (
+            <span
+              title="From web search, not the firm's own site. Worth a second look."
+              className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+            >
+              Search
+            </span>
+          )}
           {link && (
             <a
               href={link}

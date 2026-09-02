@@ -8,6 +8,7 @@ import { parseOffice } from "officeparser";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
+import { fetchFirmPages } from "./siteScrape.ts";
 
 // Initialize Firebase Admin if credentials are provided
 try {
@@ -210,20 +211,26 @@ Return the information strictly as a JSON object matching this schema:
   });
 
   /**
-   * Scans a venture firm for its portfolio companies and the people who work
-   * there. Feeds the review lane in the investor profile — everything it
-   * returns is a suggestion a person still has to accept.
+   * Researches a venture firm: who works there, and what they have backed.
+   * Feeds the review lane in the investor profile, so everything it returns is
+   * a suggestion someone still has to accept.
    *
-   * Two constraints on the model are deliberate:
+   * It reads the firm's own site first and only then falls back on the model's
+   * recall. That order is the whole point. Asked "who works at Acme Ventures",
+   * a model produces plausible names — some current, some three years stale,
+   * some invented outright. Handed the text of acmevc.com/team and asked which
+   * names appear in it, the same model is doing extraction, which it is good
+   * at, and every answer comes with a URL a person can check.
    *
-   *   - It must not return email addresses. Asked for a colleague's address a
-   *     model will invent a plausible one, and a plausible wrong address is
-   *     the kind of mistake nobody catches until mail has already gone out.
-   *     Names and titles can be eyeballed; addresses cannot.
-   *   - It must omit anything it is not confident about rather than filling
-   *     the list. A short accurate list is worth more than a long one someone
-   *     has to fact-check line by line, because a list that needs checking
-   *     everywhere gets checked nowhere.
+   * Two constraints are deliberate:
+   *
+   *   - No email addresses, ever. Asked for a colleague's address a model will
+   *     invent a plausible one, and a plausible wrong address is the mistake
+   *     nobody catches until mail has gone out. Enforced in the prompt, in the
+   *     schema, and again by stripping the field server-side.
+   *   - Omit rather than pad. A short accurate list is worth more than a long
+   *     one that has to be checked line by line, because a list that needs
+   *     checking everywhere gets checked nowhere.
    */
   app.post("/api/scan-investor-firm", async (req, res) => {
     try {
@@ -233,27 +240,53 @@ Return the information strictly as a JSON object matching this schema:
       }
       const ai = getGeminiAI();
 
+      // --- read the firm's own site, if we were given one
+      const pages = url ? await fetchFirmPages(String(url)) : [];
+      const siteText = pages
+        .map((p) => `--- PAGE: ${p.url} ---\n${p.text}`)
+        .join("\n\n");
+
       const subject = firmName
         ? `the venture capital firm "${firmName}"${url ? ` (website: ${url})` : ""}`
         : `the venture capital firm at ${url}`;
 
+      const sourceSection = pages.length
+        ? `
+Below is the text of ${pages.length} page(s) from the firm's own website. This
+is your PRIMARY source and it outranks anything you recall or find elsewhere:
+it is current, and it is the firm describing itself.
+
+For every person whose name appears in this text, set source to "website" and
+sourceUrl to the PAGE url they appeared on. Do not set source to "website" for
+anyone who is not named in the text below.
+
+${siteText}
+`
+        : `
+No usable text could be retrieved from the firm's website (it may block
+automated readers, require a login, or render entirely in JavaScript). Fall
+back on web search, and set source to "search" for everyone you list.
+`;
+
       const prompt = `
-You are a VC research analyst. Using web search, research ${subject}.
+You are a VC research analyst. Research ${subject}.
+${sourceSection}
 
 Report:
-1. Their portfolio companies. Give the company name as the company calls
-   itself. For each, note briefly where you saw it listed.
-2. The people who work at the firm — investment team, partners, principals.
-   Give name, job title, and LinkedIn URL if you find one.
+1. The people who work at the firm — investment team, partners, principals,
+   operating partners. Give name, job title, LinkedIn URL if you find one, and
+   which source the person came from.
+2. Their portfolio companies, named as the company names itself, with a brief
+   note of where you saw each listed.
 3. The firm's headquarters city.
 
 Rules, which matter more than completeness:
-- Do NOT return email addresses for anyone, under any circumstances, even if
-  you find one. The email field does not exist in the output.
-- Do NOT guess. If you are not confident a company is in their portfolio, or
-  that a person currently works there, leave it out. A short correct list is
-  far more useful than a long one that has to be checked line by line.
+- Do NOT return an email address for anyone, under any circumstances, even if
+  one appears in the page text. There is no email field in the output.
+- Do NOT guess. If you are not confident a person currently works there, or
+  that a company is in their portfolio, leave it out.
 - Do not include people who have left the firm.
+- Prefer the website text over your own recollection wherever they disagree.
 - If you cannot find reliable information, return empty arrays. Returning
   nothing is a valid and useful answer.
 `;
@@ -273,22 +306,27 @@ Rules, which matter more than completeness:
                   type: Type.OBJECT,
                   properties: {
                     name: { type: Type.STRING },
-                    evidence: {
-                      type: Type.STRING,
-                      description: "Briefly, where this was found",
-                    },
+                    evidence: { type: Type.STRING, description: "Briefly, where this was found" },
                   },
                 },
               },
               people: {
                 type: Type.ARRAY,
-                description: "People currently working at the firm. Never include email addresses.",
+                description: "People currently at the firm. Never include email addresses.",
                 items: {
                   type: Type.OBJECT,
                   properties: {
                     name: { type: Type.STRING },
                     role: { type: Type.STRING },
                     linkedin: { type: Type.STRING },
+                    source: {
+                      type: Type.STRING,
+                      description: "'website' if named in the supplied page text, otherwise 'search'",
+                    },
+                    sourceUrl: {
+                      type: Type.STRING,
+                      description: "The page URL this person was found on, when source is 'website'",
+                    },
                   },
                 },
               },
@@ -310,29 +348,61 @@ Rules, which matter more than completeness:
         throw err;
       }
 
-      // Belt and braces. The prompt and the schema both exclude emails, but a
-      // model that returns one anyway must not have it reach the client.
-      const people = Array.isArray(data.people) ? data.people : [];
-      const cleanPeople = people
-        .filter((p: any) => p && typeof p.name === "string" && p.name.trim() !== "")
-        .map((p: any) => ({
-          name: String(p.name).trim(),
-          role: p.role ? String(p.role).trim() : undefined,
-          linkedin: p.linkedin ? String(p.linkedin).trim() : undefined,
-        }));
+      const pageUrls = new Set(pages.map((p) => p.url));
+      const pageText = siteText.toLowerCase();
 
-      const companies = Array.isArray(data.companies) ? data.companies : [];
-      const cleanCompanies = companies
+      // Belt and braces. The prompt and the schema both exclude emails; a model
+      // that returns one anyway must not have it reach the client.
+      //
+      // The source claim is verified rather than trusted: a person is only
+      // labelled as coming from the website if their name is actually in the
+      // text we fetched. Without this check "website" would mean "the model
+      // said website", which is exactly the assurance we are trying to avoid.
+      const rawPeople = Array.isArray(data.people) ? data.people : [];
+      const seenPeople = new Set<string>();
+      const cleanPeople = rawPeople
+        .filter((p: any) => p && typeof p.name === "string" && p.name.trim() !== "")
+        .map((p: any) => {
+          const name = String(p.name).trim();
+          const claimedUrl = p.sourceUrl ? String(p.sourceUrl).trim() : "";
+          // Named in text we actually fetched. Not proof of employment, but it
+          // is proof the firm's own site says so, which is the claim being made.
+          const verified = pages.length > 0 && pageText.includes(name.toLowerCase());
+          return {
+            name,
+            role: p.role ? String(p.role).trim() : undefined,
+            linkedin: p.linkedin ? String(p.linkedin).trim() : undefined,
+            source: verified ? "website" : "search",
+            sourceUrl: verified && pageUrls.has(claimedUrl) ? claimedUrl : undefined,
+          };
+        })
+        .filter((p: any) => {
+          const key = p.name.toLowerCase();
+          if (seenPeople.has(key)) return false;
+          seenPeople.add(key);
+          return true;
+        });
+
+      const rawCompanies = Array.isArray(data.companies) ? data.companies : [];
+      const seenCompanies = new Set<string>();
+      const cleanCompanies = rawCompanies
         .filter((c: any) => c && typeof c.name === "string" && c.name.trim() !== "")
         .map((c: any) => ({
           name: String(c.name).trim(),
           evidence: c.evidence ? String(c.evidence).trim() : undefined,
-        }));
+        }))
+        .filter((c: any) => {
+          const key = c.name.toLowerCase();
+          if (seenCompanies.has(key)) return false;
+          seenCompanies.add(key);
+          return true;
+        });
 
       res.json({
         companies: cleanCompanies,
         people: cleanPeople,
         location: typeof data.location === "string" ? data.location : undefined,
+        pagesRead: pages.map((p) => p.url),
       });
     } catch (error) {
       console.error("Error scanning investor firm:", error);

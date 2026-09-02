@@ -26,6 +26,9 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
   const [activeTab, setActiveTab] = useState<'profile' | 'portfolio' | 'people'>('profile');
 
   const { scanFirm, isScanning: isResearching, error: scanError, setError: setScanError } = useFirmScan();
+  // Which pages the last scan managed to read. Session-only: it describes this
+  // run, not the record, so it is not persisted with the firm.
+  const [lastPagesRead, setLastPagesRead] = useState<string[]>([]);
 
   // 6,000 companies matched against a portfolio list is a lot of comparisons to
   // redo on every keystroke, so the lookup is built once per company set.
@@ -54,6 +57,7 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
     setScanError(null);
     const result = await scanFirm({ url: formData.website, firmName: formData.firmName });
     if (!result) return;
+    setLastPagesRead(result.pagesRead || []);
 
     setFormData(prev => {
       const already = new Set((prev.portfolioCompanies || []).map(n => n.toLowerCase().trim()));
@@ -142,6 +146,7 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                 email: '',
                 phone: '',
                 provenance: 'ai-confirmed' as const,
+                sourceUrl: suggestion.sourceUrl,
                 confirmedBy: user?.email || 'unknown',
                 confirmedAt: new Date().toISOString(),
               },
@@ -668,23 +673,48 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                   foundNothing={formData.lastScanFoundNothing}
                   onRescan={runScan}
                 >
-                  {pendingPeople.map(person => (
-                    <SuggestionRow
-                      key={person.name}
-                      primary={person.name}
-                      secondary={person.role}
-                      link={person.linkedin}
-                      onAccept={() => decidePerson(person, 'accepted')}
-                      onDismiss={() => decidePerson(person, 'dismissed')}
-                    />
-                  ))}
+                  {/* Site-verified names first: they are the ones worth reading. */}
+                  {[...pendingPeople]
+                    .sort((a, b) => (a.source === 'website' ? 0 : 1) - (b.source === 'website' ? 0 : 1))
+                    .map(person => (
+                      <SuggestionRow
+                        key={person.name}
+                        primary={person.name}
+                        secondary={person.role}
+                        link={person.linkedin}
+                        source={person.source}
+                        sourceUrl={person.sourceUrl}
+                        onAccept={() => decidePerson(person, 'accepted')}
+                        onDismiss={() => decidePerson(person, 'dismissed')}
+                      />
+                    ))}
                 </SuggestionPanel>
 
                 {pendingPeople.length > 0 && (
-                  <p className="-mt-3 text-[11.5px] text-slate-400">
-                    Adding someone brings across their name, title and LinkedIn. Email is left blank
-                    on purpose — the research step is not allowed to return one, because a plausible
-                    wrong address is the kind of mistake nobody catches until mail has gone out.
+                  <div className="-mt-3 space-y-1 text-[11.5px] text-slate-400">
+                    <p>
+                      <span className="font-semibold text-emerald-700 dark:text-emerald-400">On site</span> means
+                      the name was found in text read from this firm's own website — click the badge for the page.{' '}
+                      <span className="font-semibold">Search</span> means it came from the web instead, and is
+                      worth a second look.
+                    </p>
+                    <p>
+                      Adding someone brings across their name, title and LinkedIn. Email is left blank
+                      on purpose — the research step is not allowed to return one, because a plausible
+                      wrong address is the kind of mistake nobody catches until mail has gone out.
+                    </p>
+                  </div>
+                )}
+                {lastPagesRead.length > 0 && (
+                  <p className="-mt-3 text-[11px] text-slate-400">
+                    Read {lastPagesRead.length} page{lastPagesRead.length === 1 ? '' : 's'} from this firm's
+                    site: {lastPagesRead.map(u => u.replace(/^https?:\/\//, '')).join(', ')}
+                  </p>
+                )}
+                {formData.lastScanAt && lastPagesRead.length === 0 && !isResearching && (
+                  <p className="-mt-3 text-[11px] text-amber-600 dark:text-amber-500">
+                    Nothing could be read from this firm's website — it may block automated readers or
+                    render entirely in JavaScript. Results below came from web search only.
                   </p>
                 )}
                 {(!formData.contacts || formData.contacts.length === 0) ? (

@@ -196,6 +196,8 @@ export interface InvestorContact {
   notes?: string;
   /** Absent means typed by a person, which is what every existing record is. */
   provenance?: Provenance;
+  /** For accepted suggestions: the page the name was found on, if any. */
+  sourceUrl?: string;
   /** Who accepted this from a scan suggestion, and when. */
   confirmedBy?: string;
   confirmedAt?: string;
@@ -238,6 +240,14 @@ export interface PersonSuggestion {
   linkedin?: string;
   status: SuggestionStatus;
   foundAt: string;
+  /**
+   * 'website' means this name was found in text fetched from the firm's own
+   * site, and sourceUrl says which page. 'search' means it came from the
+   * model's research and is weaker. The distinction is verified server-side,
+   * not taken from the model's own claim.
+   */
+  source?: 'website' | 'search';
+  sourceUrl?: string;
 }
 
 export interface InvestorRepositoryEntry {
