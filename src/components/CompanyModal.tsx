@@ -514,346 +514,301 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
     ];
     const filledFacts = facts.filter(([, v]) => String(v ?? '').trim() !== '');
 
+    // The facts band is a four-column grid. A partial last row would leave the
+    // rules hanging in mid-air, so it is padded out with blanks — cheaper and
+    // more predictable than trying to make the borders adapt to the count.
+    const factCells = filledFacts.map(([label, value]) => `
+      <div class="cell">
+        <dt>${esc(label)}</dt>
+        <dd>${esc(value)}</dd>
+      </div>
+    `);
+    while (factCells.length % 4 !== 0) factCells.push('<div class="cell cell-blank"></div>');
+
+    /**
+     * One labelled row. Returns nothing when the field is empty: a section
+     * heading with no content under it reads as an omission on a printed page,
+     * and the reader cannot tell whether we did not ask or did not find out.
+     */
+    const row = (label: string, value: unknown): string => {
+      const text = String(value ?? '').trim();
+      if (!text) return '';
+      return `
+        <section class="row">
+          <h3>${esc(label)}</h3>
+          <div class="body"><p>${esc(text)}</p></div>
+        </section>
+      `;
+    };
+
+    const metaPairs: [string, string][] = [
+      ['Stage', esc(formData.stage)],
+      ['Vertical', esc(formData.vertical || '—')],
+      ['Location', esc(formatLocation(formData.location) || '—')],
+      ['Website', formData.website
+        ? `<a href="${esc(formData.website)}" target="_blank" rel="noopener noreferrer">${esc(formData.website.replace(/^https?:\/\//, ''))}</a>`
+        : '—'],
+      ['Founders', esc(formData.founderName || '—')],
+      ['Founder Email', formData.founderEmail
+        ? `<a href="mailto:${esc(formData.founderEmail)}">${esc(formData.founderEmail)}</a>`
+        : '—'],
+      ['Internal Source', esc(formData.source || '—')],
+      ['External Source', esc(formData.externalSource || '—')],
+    ];
+
+    const hasTerms = [formData.dealTerms, formData.useOfFunds].some(v => String(v ?? '').trim() !== '');
+
     const html = `
       <!DOCTYPE html>
       <html lang="en">
         <head>
           <meta charset="UTF-8">
-          <title>${esc(formData.name)} - Investment Memo</title>
+          <title>${esc(formData.name)} — Company Profile</title>
           <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap');
-            
+            @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
             :root {
-              --primary: #0f172a;
-              --secondary: #475569;
-              --accent: #2563eb;
-              --border: #e2e8f0;
-              --bg-light: #f8fafc;
+              --ink:   #14181f;
+              --soft:  #59616e;
+              --faint: #8b93a1;
+              --rule:  #e3e7ee;
+              --hair:  #ccd3de;
+              --wash:  #f7f8fa;
+              --navy:  #0f172a;
+              --blue:  #1d4ed8;
+
+              --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+              --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
             }
 
             * { box-sizing: border-box; }
 
-            body { 
-              font-family: 'Inter', system-ui, -apple-system, sans-serif; 
-              color: var(--primary); 
-              line-height: 1.6; 
-              padding: 0; 
+            body {
               margin: 0;
-              background: #f1f5f9;
+              background: #eef1f5;
+              color: var(--ink);
+              font-family: var(--sans);
+              -webkit-font-smoothing: antialiased;
             }
-            
+
             .page {
-              max-width: 900px;
-              margin: 40px auto;
-              padding: 60px 60px;
-              background: #fff;
-              box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+              max-width: 820px;
+              margin: 24px auto;
+              background: #ffffff;
+              box-shadow: 0 1px 2px rgba(15, 23, 42, 0.09), 0 12px 30px -14px rgba(15, 23, 42, 0.22);
             }
 
-            header {
-              border-bottom: 2px solid var(--primary);
-              padding-bottom: 24px;
-              margin-bottom: 32px;
-            }
+            a { color: var(--blue); text-decoration: none; }
 
-            .memo-label {
-              font-size: 11px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 0.15em;
-              color: var(--accent);
-              margin-bottom: 12px;
-              display: block;
-            }
+            /* ---- header ---- */
+            .head { background: var(--navy); color: #ffffff; padding: 30px 36px 26px; }
+            .head h1 { margin: 0 0 4px; font-size: 29px; font-weight: 600; letter-spacing: -0.022em; }
+            .head .dek { margin: 0 0 20px; font-size: 14px; color: #a9b4c6; }
 
-            .company-name {
-              font-size: 42px;
-              font-weight: 800;
-              margin: 0 0 8px 0;
-              letter-spacing: -0.02em;
-              line-height: 1.1;
-              color: var(--primary);
-            }
-
-            .slogan {
-              font-size: 18px;
-              color: var(--secondary);
-              font-weight: 400;
-              margin: 0 0 24px 0;
-            }
-
-            .meta-grid {
+            .meta {
               display: grid;
-              grid-template-columns: repeat(5, 1fr);
-              gap: 16px;
-              background: var(--bg-light);
-              padding: 20px;
-              border-radius: 8px;
-              border: 1px solid var(--border);
+              grid-template-columns: repeat(4, 1fr);
+              gap: 15px 22px;
+              margin: 0;
+              padding-top: 18px;
+              border-top: 1px solid rgba(255, 255, 255, 0.16);
             }
 
-            .meta-item {
-              display: flex;
-              flex-direction: column;
-            }
+            .meta > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
-            .meta-label {
-              font-size: 10px;
+            .meta dt {
+              font-family: var(--mono);
+              font-size: 9px;
+              font-weight: 500;
+              letter-spacing: 0.11em;
               text-transform: uppercase;
-              letter-spacing: 0.05em;
-              color: var(--secondary);
-              font-weight: 700;
-              margin-bottom: 4px;
+              color: #8b97ab;
             }
 
-            .meta-value {
-              font-size: 13px;
-              font-weight: 600;
-              color: var(--primary);
-              /* break-word splits mid-token, which turned an email into
-                 "jane@smithco.co / m". Only break where there is nowhere
-                 else to go. */
+            .meta dd {
+              margin: 0;
+              font-size: 12.5px;
+              font-weight: 500;
+              color: #ffffff;
               overflow-wrap: break-word;
               word-break: normal;
             }
-            
-            .meta-value a {
-              color: var(--accent);
-              text-decoration: none;
-            }
 
-            .content-grid {
+            .meta dd a { color: #9dbcff; }
+
+            /* ---- facts band ---- */
+            .facts {
               display: grid;
-              grid-template-columns: 1.8fr 1fr;
-              gap: 48px;
-            }
-
-            .main-column {
-              display: flex;
-              flex-direction: column;
-              gap: 36px;
-            }
-
-            .side-column {
-              display: flex;
-              flex-direction: column;
-              gap: 24px;
-            }
-
-            .section-title {
-              font-size: 15px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 0.05em;
-              color: var(--primary);
-              border-bottom: 1px solid var(--border);
-              padding-bottom: 8px;
-              margin: 0 0 16px 0;
-            }
-
-            .prose {
-              font-family: 'Merriweather', serif;
-              font-size: 14.5px;
-              color: #334155;
-              white-space: pre-wrap;
+              grid-template-columns: repeat(4, 1fr);
               margin: 0;
+              background: var(--wash);
+              border-bottom: 1px solid var(--rule);
+            }
+
+            .facts .cell { padding: 13px 16px; border-right: 1px solid var(--rule); }
+            .facts .cell:nth-child(4n) { border-right: none; }
+            .facts .cell:nth-child(n+5) { border-top: 1px solid var(--rule); }
+            .facts .cell-blank { background: var(--wash); }
+
+            .facts dt {
+              font-family: var(--mono);
+              font-size: 9px;
+              font-weight: 500;
+              letter-spacing: 0.11em;
+              text-transform: uppercase;
+              color: var(--faint);
+            }
+
+            .facts dd {
+              margin: 3px 0 0;
+              font-family: var(--mono);
+              font-size: 14px;
+              font-weight: 600;
+              font-variant-numeric: tabular-nums;
+              overflow-wrap: break-word;
+            }
+
+            /* ---- label-rail rows ---- */
+            .row {
+              display: grid;
+              grid-template-columns: 150px 1fr;
+              gap: 0 26px;
+              padding: 20px 36px;
+              border-bottom: 1px solid var(--rule);
+            }
+
+            .row:last-of-type { border-bottom: none; }
+
+            .row > h3 {
+              margin: 0;
+              text-align: right;
+              font-family: var(--mono);
+              font-size: 10px;
+              font-weight: 600;
+              letter-spacing: 0.11em;
+              text-transform: uppercase;
+              color: var(--blue);
               line-height: 1.7;
             }
 
-            .prose-sans {
-              font-family: 'Inter', sans-serif;
-              font-size: 13.5px;
-              color: #334155;
-              white-space: pre-wrap;
+            .row > .body { min-width: 0; }
+
+            .row > .body p {
               margin: 0;
-              line-height: 1.6;
+              font-size: 13.5px;
+              line-height: 1.65;
+              max-width: 64ch;
+              white-space: pre-wrap;
             }
 
-            .box {
-              background: var(--bg-light);
-              border: 1px solid var(--border);
-              border-radius: 8px;
-              padding: 20px;
+            .row > .body p + p { margin-top: 9px; }
+
+            .row.pass > h3 { color: #b91c1c; }
+            .row.pass > .body p { color: #7f1d1d; }
+
+            /* ---- terms ---- */
+            .split { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+
+            .sub {
+              margin: 0 0 5px;
+              font-size: 10.5px;
+              font-weight: 700;
+              letter-spacing: 0.07em;
+              text-transform: uppercase;
+              color: var(--faint);
             }
 
-            .box .section-title {
-              border-bottom: none;
-              padding-bottom: 0;
-              margin-bottom: 12px;
-              font-size: 13px;
+            .split .body-text {
+              margin: 0;
+              font-size: 13.5px;
+              line-height: 1.65;
+              white-space: pre-wrap;
             }
 
-            .empty-text {
-              color: #94a3b8;
-              font-style: italic;
-            }
-
-            table.facts {
-              width: 100%;
-              border-collapse: collapse;
-              font-family: 'Inter', sans-serif;
-              font-size: 12.5px;
-            }
-
-            table.facts th {
-              text-align: left;
-              font-weight: 500;
-              color: #64748b;
-              padding: 5px 0;
-              white-space: nowrap;
-              vertical-align: top;
-            }
-
-            table.facts td {
-              text-align: right;
-              font-weight: 600;
-              color: #1e293b;
-              padding: 5px 0 5px 12px;
-              vertical-align: top;
-            }
-
-            table.facts tr + tr th,
-            table.facts tr + tr td {
-              border-top: 1px solid var(--border);
+            .foot {
+              padding: 13px 36px;
+              border-top: 1px solid var(--rule);
+              background: var(--wash);
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              font-family: var(--mono);
+              font-size: 9.5px;
+              letter-spacing: 0.05em;
+              text-transform: uppercase;
+              color: var(--faint);
             }
 
             @media print {
               body { background: #fff; }
-              .page { padding: 0; margin: 0; max-width: 100%; box-shadow: none; }
-              @page { margin: 1.5cm; }
+              .page { margin: 0; max-width: 100%; box-shadow: none; }
+              .row { break-inside: avoid; }
+              @page { margin: 1.2cm; }
+              /* Print drops backgrounds by default, which would lose the header
+                 block and the facts band entirely. */
+              .head, .facts, .foot, .facts .cell-blank {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
             }
           </style>
         </head>
         <body>
           <div class="page">
-            <header>
-              <span class="memo-label">Investment Memo</span>
-              <h1 class="company-name">${esc(formData.name)}</h1>
-              ${formData.slogan ? `<p class="slogan">${esc(formData.slogan)}</p>` : ''}
-              
-              <div class="meta-grid">
-                <div class="meta-item">
-                  <span class="meta-label">Stage</span>
-                  <span class="meta-value">${esc(formData.stage)}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Vertical</span>
-                  <span class="meta-value">${orNone(formData.vertical)}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Location</span>
-                  <span class="meta-value">${orNone(formatLocation(formData.location))}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Website</span>
-                  <span class="meta-value">${formData.website ? `<a href="${esc(formData.website)}" target="_blank" rel="noopener noreferrer">${esc(formData.website.replace(/^https?:\/\//, ''))}</a>` : orNone('')}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Founder Name</span>
-                  <span class="meta-value">${orNone(formData.founderName)}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Founder Email</span>
-                  <span class="meta-value">${formData.founderEmail ? `<a href="mailto:${esc(formData.founderEmail)}">${esc(formData.founderEmail)}</a>` : orNone('')}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Internal Source</span>
-                  <span class="meta-value">${orNone(formData.source)}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">External Source</span>
-                  <span class="meta-value">${orNone(formData.externalSource)}</span>
-                </div>
-              </div>
+
+            <header class="head">
+              <h1>${esc(formData.name)}</h1>
+              ${formData.slogan ? `<p class="dek">${esc(formData.slogan)}</p>` : ''}
+              <dl class="meta">
+                ${metaPairs.map(([label, value]) => `
+                  <div><dt>${esc(label)}</dt><dd>${value}</dd></div>
+                `).join('')}
+              </dl>
             </header>
 
-            <div class="content-grid">
-              <div class="main-column">
-                <section>
-                  <h2 class="section-title">Company Overview</h2>
-                  <p class="prose">${orNone(formData.basics, 'No overview provided.')}</p>
-                </section>
+            ${filledFacts.length ? `<dl class="facts">${factCells.join('')}</dl>` : ''}
 
-                ${formData.foundersBackground ? `
-                <section>
-                  <h2 class="section-title">Founders</h2>
-                  <p class="prose">${esc(formData.foundersBackground)}</p>
-                </section>
-                ` : ''}
+            ${formData.stage === 'Passed' ? `
+              <section class="row pass">
+                <h3>Reason for Pass</h3>
+                <div class="body"><p>${orNone(formData.reasonForPass)}</p></div>
+              </section>
+            ` : ''}
 
-                ${formData.statusUpdate ? `
-                <section>
-                  <h2 class="section-title">Takeaways</h2>
-                  <p class="prose">${esc(formData.statusUpdate)}</p>
-                </section>
-                ` : ''}
+            ${row('Description', formData.basics)}
+            ${row('Founders', formData.foundersBackground)}
+            ${row('Market Problem', formData.marketProblem)}
+            ${row('Company Solution', formData.companySolution)}
+            ${row('Competition', formData.competition)}
+            ${row('Pricing', formData.pricing)}
+            ${row('Go-To-Market', formData.gtm)}
+            ${row('Revenue', formData.revenue)}
 
-                <section>
-                  <h2 class="section-title">Market & Problem</h2>
-                  <p class="prose">${orNone(formData.marketProblem, 'No market problem provided.')}</p>
-                </section>
-
-                <section>
-                  <h2 class="section-title">Product & Solution</h2>
-                  <p class="prose">${orNone(formData.companySolution, 'No solution provided.')}</p>
-                </section>
-
-                <section>
-                  <h2 class="section-title">Competitive Landscape</h2>
-                  <p class="prose">${orNone(formData.competition, 'No competition data provided.')}</p>
-                </section>
-              </div>
-
-              <div class="side-column">
-                ${filledFacts.length ? `
-                <div class="box">
-                  <h2 class="section-title">Company Facts</h2>
-                  <table class="facts">
-                    ${filledFacts.map(([label, value]) => `
-                      <tr>
-                        <th>${esc(label)}</th>
-                        <td>${esc(value)}</td>
-                      </tr>
-                    `).join('')}
-                  </table>
+            ${hasTerms ? `
+              <section class="row">
+                <h3>Deal Terms</h3>
+                <div class="body">
+                  <div class="split">
+                    <div>
+                      <p class="sub">This round</p>
+                      <p class="body-text">${orNone(formData.dealTerms)}</p>
+                    </div>
+                    <div>
+                      <p class="sub">Use of funds</p>
+                      <p class="body-text">${orNone(formData.useOfFunds)}</p>
+                    </div>
+                  </div>
                 </div>
-                ` : ''}
+              </section>
+            ` : ''}
 
-                <div class="box">
-                  <h2 class="section-title">Deal Terms</h2>
-                  <p class="prose-sans">${orNone(formData.dealTerms)}</p>
-                </div>
+            ${row('Past Financing', formData.pastFinancing)}
 
-                ${formData.useOfFunds ? `
-                <div class="box">
-                  <h2 class="section-title">Use of Funds</h2>
-                  <p class="prose-sans">${esc(formData.useOfFunds)}</p>
-                </div>
-                ` : ''}
-
-                <div class="box">
-                  <h2 class="section-title">Revenue & Traction</h2>
-                  <p class="prose-sans">${orNone(formData.revenue)}</p>
-                </div>
-
-                <div class="box">
-                  <h2 class="section-title">Go-To-Market & Pricing</h2>
-                  <p class="prose-sans"><strong>GTM:</strong><br/>${orNone(formData.gtm)}<br/><br/><strong>Pricing:</strong><br/>${orNone(formData.pricing)}</p>
-                </div>
-
-                <div class="box">
-                  <h2 class="section-title">Past Financing</h2>
-                  <p class="prose-sans">${orNone(formData.pastFinancing)}</p>
-                </div>
-
-                ${(formData.stage === 'Passed') ? `
-                <div class="box" style="border-color: #fca5a5; background: #fef2f2;">
-                  <h2 class="section-title" style="color: #991b1b;">Reason for Pass</h2>
-                  <p class="prose-sans" style="color: #7f1d1d;">${orNone(formData.reasonForPass)}</p>
-                </div>
-                ` : ''}
-              </div>
+            <div class="foot">
+              <span>Stratos VP · Internal</span>
+              <span>Exported ${esc(new Date().toLocaleDateString())}</span>
             </div>
+
           </div>
           <script>
             window.onload = () => {
@@ -865,7 +820,6 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
         </body>
       </html>
     `;
-
     printWindow.document.write(html);
     printWindow.document.close();
   };
@@ -899,7 +853,9 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
     { name: 'marketProblem', label: 'Market Problem', type: 'textarea' },
     { name: 'companySolution', label: 'Company Solution', type: 'textarea' },
     { name: 'competition', label: 'Competition', type: 'textarea' },
-    { name: 'pricing', label: 'Pricing', type: 'text' },
+    // Pricing gets a full-width section in the export, which a single line
+    // cannot fill. Same treatment as GTM below it.
+    { name: 'pricing', label: 'Pricing', type: 'textarea' },
     { name: 'gtm', label: 'Go-To-Market (GTM)', type: 'textarea' },
   ];
 
