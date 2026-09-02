@@ -8,6 +8,7 @@ import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db, storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { cn, formatLocation } from '../utils';
+import { runwayMonths, formatRunway } from '../money';
 import { useAttachments } from '../hooks/useAttachments';
 import { useGemini } from '../hooks/useGemini';
 import { useInvestors } from '../hooks/useInvestors';
@@ -476,12 +477,49 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
       return;
     }
 
+    /**
+     * Everything below is interpolated into a raw HTML string, so anything a
+     * user typed has to be escaped on the way in. This is not hypothetical
+     * tidiness: a company called "Smith & Co" or a use-of-funds note using a
+     * "<" renders as broken markup or vanishes entirely, and the person
+     * printing the memo finds out in front of whoever they handed it to.
+     */
+    const esc = (value: unknown): string =>
+      String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    /** A field, or the italic placeholder when it is empty. */
+    const orNone = (value: unknown, placeholder = 'N/A'): string => {
+      const text = String(value ?? '').trim();
+      return text ? esc(text) : `<span class="empty-text">${placeholder}</span>`;
+    };
+
+    const months = runwayMonths(formData.cashBalance, formData.monthlyBurn);
+
+    // Only the facts that were filled in. An empty row on a one-pager reads as
+    // "we did not ask", which is worse than the row not being there.
+    const facts: [string, string | undefined][] = [
+      ['Year Founded', formData.yearFounded],
+      ['Entity', formData.entityInfo],
+      ['FTE', formData.fte],
+      ['Customers', formData.customerCount],
+      ['TAM', formData.tam],
+      ['Cash Balance', formData.cashBalance],
+      ['Monthly Burn', formData.monthlyBurn],
+      // Derived, and labelled as such so nobody takes it for a reported figure.
+      ['Runway (implied)', months !== null ? formatRunway(months) : undefined],
+    ];
+    const filledFacts = facts.filter(([, v]) => String(v ?? '').trim() !== '');
+
     const html = `
       <!DOCTYPE html>
       <html lang="en">
         <head>
           <meta charset="UTF-8">
-          <title>${formData.name} - Investment Memo</title>
+          <title>${esc(formData.name)} - Investment Memo</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap');
             
@@ -572,7 +610,11 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
               font-size: 13px;
               font-weight: 600;
               color: var(--primary);
-              word-break: break-word;
+              /* break-word splits mid-token, which turned an email into
+                 "jane@smithco.co / m". Only break where there is nowhere
+                 else to go. */
+              overflow-wrap: break-word;
+              word-break: normal;
             }
             
             .meta-value a {
@@ -646,6 +688,35 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
               font-style: italic;
             }
 
+            table.facts {
+              width: 100%;
+              border-collapse: collapse;
+              font-family: 'Inter', sans-serif;
+              font-size: 12.5px;
+            }
+
+            table.facts th {
+              text-align: left;
+              font-weight: 500;
+              color: #64748b;
+              padding: 5px 0;
+              white-space: nowrap;
+              vertical-align: top;
+            }
+
+            table.facts td {
+              text-align: right;
+              font-weight: 600;
+              color: #1e293b;
+              padding: 5px 0 5px 12px;
+              vertical-align: top;
+            }
+
+            table.facts tr + tr th,
+            table.facts tr + tr td {
+              border-top: 1px solid var(--border);
+            }
+
             @media print {
               body { background: #fff; }
               .page { padding: 0; margin: 0; max-width: 100%; box-shadow: none; }
@@ -657,41 +728,41 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
           <div class="page">
             <header>
               <span class="memo-label">Investment Memo</span>
-              <h1 class="company-name">${formData.name}</h1>
-              ${formData.slogan ? `<p class="slogan">${formData.slogan}</p>` : ''}
+              <h1 class="company-name">${esc(formData.name)}</h1>
+              ${formData.slogan ? `<p class="slogan">${esc(formData.slogan)}</p>` : ''}
               
               <div class="meta-grid">
                 <div class="meta-item">
                   <span class="meta-label">Stage</span>
-                  <span class="meta-value">${formData.stage}</span>
+                  <span class="meta-value">${esc(formData.stage)}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Vertical</span>
-                  <span class="meta-value">${formData.vertical || 'N/A'}</span>
+                  <span class="meta-value">${orNone(formData.vertical)}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Location</span>
-                  <span class="meta-value">${formatLocation(formData.location) || 'N/A'}</span>
+                  <span class="meta-value">${orNone(formatLocation(formData.location))}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Website</span>
-                  <span class="meta-value">${formData.website ? `<a href="${formData.website}" target="_blank">${formData.website.replace(/^https?:\/\//, '')}</a>` : 'N/A'}</span>
+                  <span class="meta-value">${formData.website ? `<a href="${esc(formData.website)}" target="_blank" rel="noopener noreferrer">${esc(formData.website.replace(/^https?:\/\//, ''))}</a>` : orNone('')}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Founder Name</span>
-                  <span class="meta-value">${formData.founderName || 'N/A'}</span>
+                  <span class="meta-value">${orNone(formData.founderName)}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Founder Email</span>
-                  <span class="meta-value">${formData.founderEmail ? `<a href="mailto:${formData.founderEmail}">${formData.founderEmail}</a>` : 'N/A'}</span>
+                  <span class="meta-value">${formData.founderEmail ? `<a href="mailto:${esc(formData.founderEmail)}">${esc(formData.founderEmail)}</a>` : orNone('')}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Internal Source</span>
-                  <span class="meta-value">${formData.source || 'N/A'}</span>
+                  <span class="meta-value">${orNone(formData.source)}</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">External Source</span>
-                  <span class="meta-value">${formData.externalSource || 'N/A'}</span>
+                  <span class="meta-value">${orNone(formData.externalSource)}</span>
                 </div>
               </div>
             </header>
@@ -700,57 +771,85 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
               <div class="main-column">
                 <section>
                   <h2 class="section-title">Company Overview</h2>
-                  <p class="prose">${formData.basics || '<span class="empty-text">No overview provided.</span>'}</p>
+                  <p class="prose">${orNone(formData.basics, 'No overview provided.')}</p>
                 </section>
+
+                ${formData.foundersBackground ? `
+                <section>
+                  <h2 class="section-title">Founders</h2>
+                  <p class="prose">${esc(formData.foundersBackground)}</p>
+                </section>
+                ` : ''}
 
                 ${formData.statusUpdate ? `
                 <section>
                   <h2 class="section-title">Takeaways</h2>
-                  <p class="prose">${formData.statusUpdate}</p>
+                  <p class="prose">${esc(formData.statusUpdate)}</p>
                 </section>
                 ` : ''}
 
                 <section>
                   <h2 class="section-title">Market & Problem</h2>
-                  <p class="prose">${formData.marketProblem || '<span class="empty-text">No market problem provided.</span>'}</p>
+                  <p class="prose">${orNone(formData.marketProblem, 'No market problem provided.')}</p>
                 </section>
 
                 <section>
                   <h2 class="section-title">Product & Solution</h2>
-                  <p class="prose">${formData.companySolution || '<span class="empty-text">No solution provided.</span>'}</p>
+                  <p class="prose">${orNone(formData.companySolution, 'No solution provided.')}</p>
                 </section>
 
                 <section>
                   <h2 class="section-title">Competitive Landscape</h2>
-                  <p class="prose">${formData.competition || '<span class="empty-text">No competition data provided.</span>'}</p>
+                  <p class="prose">${orNone(formData.competition, 'No competition data provided.')}</p>
                 </section>
               </div>
 
               <div class="side-column">
+                ${filledFacts.length ? `
+                <div class="box">
+                  <h2 class="section-title">Company Facts</h2>
+                  <table class="facts">
+                    ${filledFacts.map(([label, value]) => `
+                      <tr>
+                        <th>${esc(label)}</th>
+                        <td>${esc(value)}</td>
+                      </tr>
+                    `).join('')}
+                  </table>
+                </div>
+                ` : ''}
+
                 <div class="box">
                   <h2 class="section-title">Deal Terms</h2>
-                  <p class="prose-sans">${formData.dealTerms || '<span class="empty-text">N/A</span>'}</p>
+                  <p class="prose-sans">${orNone(formData.dealTerms)}</p>
                 </div>
+
+                ${formData.useOfFunds ? `
+                <div class="box">
+                  <h2 class="section-title">Use of Funds</h2>
+                  <p class="prose-sans">${esc(formData.useOfFunds)}</p>
+                </div>
+                ` : ''}
 
                 <div class="box">
                   <h2 class="section-title">Revenue & Traction</h2>
-                  <p class="prose-sans">${formData.revenue || '<span class="empty-text">N/A</span>'}</p>
+                  <p class="prose-sans">${orNone(formData.revenue)}</p>
                 </div>
 
                 <div class="box">
                   <h2 class="section-title">Go-To-Market & Pricing</h2>
-                  <p class="prose-sans"><strong>GTM:</strong><br/>${formData.gtm || '<span class="empty-text">N/A</span>'}<br/><br/><strong>Pricing:</strong><br/>${formData.pricing || '<span class="empty-text">N/A</span>'}</p>
+                  <p class="prose-sans"><strong>GTM:</strong><br/>${orNone(formData.gtm)}<br/><br/><strong>Pricing:</strong><br/>${orNone(formData.pricing)}</p>
                 </div>
 
                 <div class="box">
                   <h2 class="section-title">Past Financing</h2>
-                  <p class="prose-sans">${formData.pastFinancing || '<span class="empty-text">N/A</span>'}</p>
+                  <p class="prose-sans">${orNone(formData.pastFinancing)}</p>
                 </div>
 
                 ${(formData.stage === 'Passed') ? `
                 <div class="box" style="border-color: #fca5a5; background: #fef2f2;">
                   <h2 class="section-title" style="color: #991b1b;">Reason for Pass</h2>
-                  <p class="prose-sans" style="color: #7f1d1d;">${formData.reasonForPass || '<span class="empty-text">N/A</span>'}</p>
+                  <p class="prose-sans" style="color: #7f1d1d;">${orNone(formData.reasonForPass)}</p>
                 </div>
                 ` : ''}
               </div>
@@ -782,6 +881,21 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
     { name: 'externalSource', label: 'External Source', type: 'text' },
     { name: 'referrers', label: 'Referred By', type: 'referrers' },
     { name: 'basics', label: 'Description', type: 'textarea' },
+    { name: 'foundersBackground', label: 'Founders Background', type: 'textarea' },
+
+    // Company facts. All text on purpose — see the note on Company in
+    // types.ts. Decks say "~40 logos" and "2019 (spun out of Stanford)", and a
+    // number input makes whoever is typing choose between losing that detail
+    // and leaving the field blank.
+    { name: 'yearFounded', label: 'Year Founded', type: 'text' },
+    { name: 'entityInfo', label: 'Entity Info', type: 'text' },
+    { name: 'fte', label: 'FTE (Headcount)', type: 'text' },
+    { name: 'customerCount', label: 'Customers', type: 'text' },
+    { name: 'tam', label: 'TAM', type: 'text' },
+    { name: 'cashBalance', label: 'Cash Balance', type: 'text' },
+    { name: 'monthlyBurn', label: 'Monthly Burn', type: 'text' },
+    { name: 'useOfFunds', label: 'Use of Funds', type: 'textarea' },
+
     { name: 'marketProblem', label: 'Market Problem', type: 'textarea' },
     { name: 'companySolution', label: 'Company Solution', type: 'textarea' },
     { name: 'competition', label: 'Competition', type: 'textarea' },

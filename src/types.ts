@@ -346,6 +346,31 @@ export interface Company {
   createdBy?: string;
   founderEmail?: string;
   founderName?: string;
+  /** Who the founders are and what they did before. Carries into the one-pager. */
+  foundersBackground?: string;
+
+  // --- Company facts.
+  //
+  // All free text, deliberately. These come off pitch decks, where the honest
+  // answer is usually "~40 enterprise logos" or "2019 (spun out of Stanford)",
+  // and a number field forces whoever is typing to either lose that or leave
+  // it blank. Same reasoning the team already settled on for revenue.
+  /** Year the company was founded. */
+  yearFounded?: string;
+  /** Legal entity and domicile, e.g. "Delaware C-Corp". */
+  entityInfo?: string;
+  /** Headcount. */
+  fte?: string;
+  /** How many customers they have. */
+  customerCount?: string;
+  /** Total addressable market. */
+  tam?: string;
+  /** Cash in the bank. Parsed for runway where it can be. */
+  cashBalance?: string;
+  /** Net monthly burn. Parsed for runway where it can be. */
+  monthlyBurn?: string;
+  /** What they intend to do with the raise. */
+  useOfFunds?: string;
   conversationSummary?: {
     summary: string;
     nextSteps: string[];

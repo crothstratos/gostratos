@@ -663,7 +663,12 @@ Return the information strictly as a JSON object matching this schema:
 
       const prompt = `
 You are an expert VC analyst. Analyze the following startup data provided.
-Extract the following information and return it strictly as a JSON object matching this schema (use null if not found):
+Extract the following information and return it strictly as a JSON object matching this schema (use null if not found).
+
+Copy figures as the source states them — "~40 enterprise logos", "$1.2M ARR",
+"2019 (spun out of Stanford)". Do not round, convert, normalise or infer a
+value that is not stated. A figure that is nearly right is worse than a blank
+field, because a blank one gets asked about and a wrong one gets quoted.
 {
   "name": "Startup Name",
   "website": "Domain",
@@ -673,6 +678,15 @@ Extract the following information and return it strictly as a JSON object matchi
   "basics": "One paragraph summary",
   "founderName": "Founders",
   "founderEmail": "Emails",
+  "foundersBackground": "Who the founders are and what they did before — prior companies, roles, education",
+  "yearFounded": "Year the company was founded",
+  "entityInfo": "Legal entity and domicile, e.g. Delaware C-Corp",
+  "fte": "Headcount / full-time employees",
+  "customerCount": "Number of customers, as stated",
+  "tam": "Total addressable market, as stated",
+  "cashBalance": "Cash on hand, as stated",
+  "monthlyBurn": "Monthly burn rate, as stated",
+  "useOfFunds": "What they plan to do with the money raised",
   "revenue": "Revenue stats",
   "dealTerms": "Deal terms",
   "pastFinancing": "Past rounds",
