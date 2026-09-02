@@ -209,6 +209,137 @@ Return the information strictly as a JSON object matching this schema:
     }
   });
 
+  /**
+   * Scans a venture firm for its portfolio companies and the people who work
+   * there. Feeds the review lane in the investor profile — everything it
+   * returns is a suggestion a person still has to accept.
+   *
+   * Two constraints on the model are deliberate:
+   *
+   *   - It must not return email addresses. Asked for a colleague's address a
+   *     model will invent a plausible one, and a plausible wrong address is
+   *     the kind of mistake nobody catches until mail has already gone out.
+   *     Names and titles can be eyeballed; addresses cannot.
+   *   - It must omit anything it is not confident about rather than filling
+   *     the list. A short accurate list is worth more than a long one someone
+   *     has to fact-check line by line, because a list that needs checking
+   *     everywhere gets checked nowhere.
+   */
+  app.post("/api/scan-investor-firm", async (req, res) => {
+    try {
+      const { url, firmName } = req.body;
+      if (!url && !firmName) {
+        return res.status(400).json({ error: "A website or firm name is required." });
+      }
+      const ai = getGeminiAI();
+
+      const subject = firmName
+        ? `the venture capital firm "${firmName}"${url ? ` (website: ${url})` : ""}`
+        : `the venture capital firm at ${url}`;
+
+      const prompt = `
+You are a VC research analyst. Using web search, research ${subject}.
+
+Report:
+1. Their portfolio companies. Give the company name as the company calls
+   itself. For each, note briefly where you saw it listed.
+2. The people who work at the firm — investment team, partners, principals.
+   Give name, job title, and LinkedIn URL if you find one.
+3. The firm's headquarters city.
+
+Rules, which matter more than completeness:
+- Do NOT return email addresses for anyone, under any circumstances, even if
+  you find one. The email field does not exist in the output.
+- Do NOT guess. If you are not confident a company is in their portfolio, or
+  that a person currently works there, leave it out. A short correct list is
+  far more useful than a long one that has to be checked line by line.
+- Do not include people who have left the firm.
+- If you cannot find reliable information, return empty arrays. Returning
+  nothing is a valid and useful answer.
+`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              companies: {
+                type: Type.ARRAY,
+                description: "Portfolio companies the firm has invested in",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    evidence: {
+                      type: Type.STRING,
+                      description: "Briefly, where this was found",
+                    },
+                  },
+                },
+              },
+              people: {
+                type: Type.ARRAY,
+                description: "People currently working at the firm. Never include email addresses.",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    role: { type: Type.STRING },
+                    linkedin: { type: Type.STRING },
+                  },
+                },
+              },
+              location: { type: Type.STRING, description: "Headquarters city" },
+            },
+          },
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      let text = response.text || "{}";
+      text = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
+
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        console.error("scan-investor-firm: JSON parsing error. Raw response:", text);
+        throw err;
+      }
+
+      // Belt and braces. The prompt and the schema both exclude emails, but a
+      // model that returns one anyway must not have it reach the client.
+      const people = Array.isArray(data.people) ? data.people : [];
+      const cleanPeople = people
+        .filter((p: any) => p && typeof p.name === "string" && p.name.trim() !== "")
+        .map((p: any) => ({
+          name: String(p.name).trim(),
+          role: p.role ? String(p.role).trim() : undefined,
+          linkedin: p.linkedin ? String(p.linkedin).trim() : undefined,
+        }));
+
+      const companies = Array.isArray(data.companies) ? data.companies : [];
+      const cleanCompanies = companies
+        .filter((c: any) => c && typeof c.name === "string" && c.name.trim() !== "")
+        .map((c: any) => ({
+          name: String(c.name).trim(),
+          evidence: c.evidence ? String(c.evidence).trim() : undefined,
+        }));
+
+      res.json({
+        companies: cleanCompanies,
+        people: cleanPeople,
+        location: typeof data.location === "string" ? data.location : undefined,
+      });
+    } catch (error) {
+      console.error("Error scanning investor firm:", error);
+      res.status(500).json({ error: "Failed to scan firm" });
+    }
+  });
+
   app.post("/api/discover-coinvestors", async (req, res) => {
     try {
       const { companyName, companyDescription, vertical } = req.body;

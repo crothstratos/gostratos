@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { InvestorRepositoryEntry } from '../types';
+import { InvestorRepositoryEntry, Company } from '../types';
 import { Plus, Search, Edit2, Trash2, Globe, Wand2, X, Building2, User, Mail, Phone, DollarSign, Target, Briefcase, MapPin, Clock } from 'lucide-react';
 import { cn, formatLocation } from '../utils';
 import { LocationInput } from './LocationInput';
 import { InvestorModal } from './InvestorModal';
 import { useGemini } from '../hooks/useGemini';
 import { useInvestors } from '../hooks/useInvestors';
+import { useStaleInvestors } from '../hooks/useInvestorFit';
+import { AlertCircle, ChevronRight } from 'lucide-react';
 
-export const InvestorsTab = React.memo(function InvestorsTab() {
+export const InvestorsTab = React.memo(function InvestorsTab({
+  onCompanyClick,
+}: {
+  /** Opens a portfolio company's profile from inside an investor. */
+  onCompanyClick?: (company: Company) => void;
+} = {}) {
   const {
     investors,
     isLoading,
@@ -19,6 +26,11 @@ export const InvestorsTab = React.memo(function InvestorsTab() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showStale, setShowStale] = useState(false);
+
+  // Relationships that have gone quiet. 90 days is a quarter — long enough
+  // that a partner would want to know, short enough to still be actionable.
+  const stale = useStaleInvestors(investors, 90);
   const [editingInvestor, setEditingInvestor] = useState<InvestorRepositoryEntry | null>(null);
 
   const {
@@ -179,6 +191,60 @@ export const InvestorsTab = React.memo(function InvestorsTab() {
       </div>
 
       <div className="flex-1 overflow-auto p-8">
+        {stale.length > 0 && !searchQuery && (
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/70 dark:border-amber-800/40 dark:bg-amber-900/15">
+            <button
+              type="button"
+              onClick={() => setShowStale(v => !v)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+              <span className="flex-1 text-[13.5px] font-medium text-amber-900 dark:text-amber-300">
+                {stale.length} {stale.length === 1 ? 'relationship has' : 'relationships have'} gone quiet
+              </span>
+              <ChevronRight
+                className={cn(
+                  'h-4 w-4 shrink-0 text-amber-600 transition-transform dark:text-amber-500',
+                  showStale && 'rotate-90'
+                )}
+              />
+            </button>
+
+            {showStale && (
+              <div className="border-t border-amber-200/70 px-4 py-3 dark:border-amber-800/40">
+                <p className="mb-2.5 text-[11.5px] text-amber-800/80 dark:text-amber-400/80">
+                  No note logged in 90 days. Where a firm has no notes at all, this falls back to when
+                  the record was last edited — a weaker signal, marked below.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {stale.slice(0, 12).map(({ firm, daysSince, basis }) => (
+                    <button
+                      key={firm.id}
+                      type="button"
+                      onClick={() => handleOpenModal(firm)}
+                      className="flex items-center gap-3 rounded-lg border border-amber-200/70 bg-white px-3 py-2 text-left transition-colors hover:border-amber-300 dark:border-amber-800/40 dark:bg-slate-900"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-900 dark:text-white">
+                        {firm.firmName}
+                      </span>
+                      <span className="shrink-0 text-[11.5px] text-slate-400">
+                        {daysSince === null
+                          ? 'never logged'
+                          : `${daysSince} days${basis === 'edit' ? ' (last edit)' : ''}`}
+                      </span>
+                    </button>
+                  ))}
+                  {stale.length > 12 && (
+                    <p className="pt-1 text-[11.5px] text-amber-800/70 dark:text-amber-400/70">
+                      +{stale.length - 12} more
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {error ? (
           <div className="rounded-lg bg-red-50 p-4 text-red-600 dark:bg-red-900/20 dark:text-red-400">
             {error}
@@ -307,6 +373,7 @@ export const InvestorsTab = React.memo(function InvestorsTab() {
         <InvestorModal
           investor={editingInvestor ? (editingInvestor as any) : (formData as any)}
           isNew={!editingInvestor}
+          onCompanyClick={onCompanyClick}
           onClose={() => setIsModalOpen(false)}
           onSave={(data) => {
              // Adapt the handleSave to match what it expects

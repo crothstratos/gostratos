@@ -194,12 +194,50 @@ export interface InvestorContact {
   role?: string;
   linkedin?: string;
   notes?: string;
+  /** Absent means typed by a person, which is what every existing record is. */
+  provenance?: Provenance;
+  /** Who accepted this from a scan suggestion, and when. */
+  confirmedBy?: string;
+  confirmedAt?: string;
 }
 
 export interface ProfileNote {
   id: string;
   text: string;
   timestamp: string;
+}
+
+/**
+ * Where a piece of data came from. Stamped on anything a model produced so a
+ * guess is never mistaken for something a person checked.
+ */
+export type Provenance = 'human' | 'ai' | 'ai-confirmed';
+
+export type SuggestionStatus = 'pending' | 'accepted' | 'dismissed';
+
+/** A portfolio company a scan believes this firm holds, awaiting review. */
+export interface PortfolioSuggestion {
+  name: string;
+  status: SuggestionStatus;
+  foundAt: string;
+  /** Where the model says it found this, when it says. Free text. */
+  evidence?: string;
+}
+
+/**
+ * Someone a scan believes works at this firm, awaiting review.
+ *
+ * There is deliberately no email field. A model asked for a colleague's
+ * address will invent a plausible one, and an invented address that looks
+ * right is the kind of error that only surfaces after someone sends to it.
+ * Names and roles can be checked at a glance; addresses cannot.
+ */
+export interface PersonSuggestion {
+  name: string;
+  role?: string;
+  linkedin?: string;
+  status: SuggestionStatus;
+  foundAt: string;
 }
 
 export interface InvestorRepositoryEntry {
@@ -224,6 +262,14 @@ export interface InvestorRepositoryEntry {
   createdBy?: string;
   lastModified: string;
   isLead?: boolean;
+
+  /** Scan output awaiting a human decision. See the review lane in InvestorModal. */
+  suggestedPortfolioCompanies?: PortfolioSuggestion[];
+  suggestedContacts?: PersonSuggestion[];
+  /** When the firm was last scanned, so it is not re-scanned on every open. */
+  lastScanAt?: string;
+  /** Set when a scan produced nothing, to distinguish "not scanned" from "nothing found". */
+  lastScanFoundNothing?: boolean;
 }
 
 

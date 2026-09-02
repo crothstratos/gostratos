@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
-import { InvestorRepositoryEntry } from '../types';
-import { Plus, X, Building2, Globe, MapPin, Edit2, Check, DollarSign, Target, Briefcase, Mail, Phone, ExternalLink, Clock, Trash2, Wand2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { InvestorRepositoryEntry, Company, PortfolioSuggestion, PersonSuggestion } from '../types';
+import { Plus, X, Building2, Globe, MapPin, Edit2, Check, DollarSign, Target, Briefcase, Mail, Phone, ExternalLink, Clock, Trash2, Wand2, Sparkles, ArrowUpRight } from 'lucide-react';
 import { LocationInput } from './LocationInput';
 import { cn } from '../utils';
 import { useGemini } from '../hooks/useGemini';
 import { useCompanies } from '../hooks/useCompanies';
+import { useFirmScan } from '../hooks/useFirmScan';
+import { buildCompanyIndex, lookupCompany } from '../companyMatch';
+import { SuggestionPanel, SuggestionRow } from './SuggestionReview';
 import { useAuth } from './AuthContext';
 
 interface InvestorModalProps {
@@ -12,10 +15,11 @@ interface InvestorModalProps {
   onClose: () => void;
   onSave: (investor: Partial<InvestorRepositoryEntry>) => void;
   isNew?: boolean;
-  
+  /** Opens a portfolio company's profile. Without it, names stay plain text. */
+  onCompanyClick?: (company: Company) => void;
 }
 
-export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew,  }: InvestorModalProps) {
+export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew, onCompanyClick }: InvestorModalProps) {
   const { user } = useAuth();
   const { companies } = useCompanies(user);
   const { isScanning, handleScanWebsite: originalHandleScanWebsite } = useGemini();
@@ -23,12 +27,132 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
   const [formData, setFormData] = useState<Partial<InvestorRepositoryEntry>>(investor || {});
   const [activeTab, setActiveTab] = useState<'profile' | 'portfolio' | 'people'>('profile');
 
+  const { scanFirm, isScanning: isResearching, error: scanError, setError: setScanError } = useFirmScan();
+
+  // 6,000 companies matched against a portfolio list is a lot of comparisons to
+  // redo on every keystroke, so the lookup is built once per company set.
+  const companyIndex = useMemo(() => buildCompanyIndex(companies), [companies]);
+
   const removePortfolioCompany = (index: number) => {
     setFormData(prev => ({
       ...prev,
       portfolioCompanies: prev.portfolioCompanies?.filter((_, i) => i !== index)
     }));
   };
+
+  // ---- research and the review lane -------------------------------------
+
+  const pendingCompanies = (formData.suggestedPortfolioCompanies || []).filter(x => x.status === 'pending');
+  const pendingPeople = (formData.suggestedContacts || []).filter(x => x.status === 'pending');
+
+  /**
+   * Researches the firm and files what comes back as pending suggestions.
+   *
+   * Anything already on the record is skipped, and so is anything previously
+   * dismissed — being told twice that a wrong company belongs here is how a
+   * review lane stops getting read.
+   */
+  const runScan = async () => {
+    setScanError(null);
+    const result = await scanFirm({ url: formData.website, firmName: formData.firmName });
+    if (!result) return;
+
+    setFormData(prev => {
+      const already = new Set((prev.portfolioCompanies || []).map(n => n.toLowerCase().trim()));
+      const decided = new Set((prev.suggestedPortfolioCompanies || []).map(x => x.name.toLowerCase().trim()));
+      const freshCompanies = result.companies.filter(
+        c => !already.has(c.name.toLowerCase().trim()) && !decided.has(c.name.toLowerCase().trim())
+      );
+
+      const knownPeople = new Set((prev.contacts || []).map(c => (c.name || '').toLowerCase().trim()));
+      const decidedPeople = new Set((prev.suggestedContacts || []).map(x => x.name.toLowerCase().trim()));
+      const freshPeople = result.people.filter(
+        p => !knownPeople.has(p.name.toLowerCase().trim()) && !decidedPeople.has(p.name.toLowerCase().trim())
+      );
+
+      return {
+        ...prev,
+        suggestedPortfolioCompanies: [...(prev.suggestedPortfolioCompanies || []), ...freshCompanies],
+        suggestedContacts: [...(prev.suggestedContacts || []), ...freshPeople],
+        lastScanAt: new Date().toISOString(),
+        lastScanFoundNothing: freshCompanies.length === 0 && freshPeople.length === 0,
+        ...(result.location && !prev.location ? { location: result.location as any } : {}),
+      };
+    });
+  };
+
+  /**
+   * Researches a firm that has never been researched, the first time someone
+   * opens its Portfolio or People tab.
+   *
+   * Two things this deliberately is not:
+   *
+   * It is not triggered by typing. An earlier version watched firmName, which
+   * fires on the first keystroke — "A" — and burns a grounded model call
+   * researching a firm called A. Opening the tab is an unambiguous signal that
+   * the name is finished.
+   *
+   * It is not repeated. The ref guards against the effect re-running on the
+   * re-render the scan's own setState causes, and lastScanAt stops it across
+   * re-opens. After that, refreshing is the Research again button's job — a
+   * scan that quietly re-runs is a scan that quietly costs money.
+   */
+  const MIN_NAME_FOR_SCAN = 3;
+  const autoScanned = useRef(false);
+  useEffect(() => {
+    if (autoScanned.current) return;
+    if (activeTab !== 'portfolio' && activeTab !== 'people') return;
+    if (formData.lastScanAt) return;
+    const name = (formData.firmName || '').trim();
+    if (name.length < MIN_NAME_FOR_SCAN && !formData.website) return;
+    autoScanned.current = true;
+    runScan();
+    // Fires on the tab change only; the ref makes it once-per-open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const decideCompany = (name: string, status: 'accepted' | 'dismissed') => {
+    setFormData(prev => ({
+      ...prev,
+      suggestedPortfolioCompanies: (prev.suggestedPortfolioCompanies || []).map(x =>
+        x.name === name ? { ...x, status } : x
+      ),
+      portfolioCompanies:
+        status === 'accepted'
+          ? [...(prev.portfolioCompanies || []), name].filter((v, i, a) => a.indexOf(v) === i)
+          : prev.portfolioCompanies,
+    }));
+  };
+
+  const decidePerson = (suggestion: PersonSuggestion, status: 'accepted' | 'dismissed') => {
+    setFormData(prev => ({
+      ...prev,
+      suggestedContacts: (prev.suggestedContacts || []).map(x =>
+        x.name === suggestion.name ? { ...x, status } : x
+      ),
+      contacts:
+        status === 'accepted'
+          ? [
+              ...(prev.contacts || []),
+              {
+                id: crypto.randomUUID(),
+                name: suggestion.name,
+                role: suggestion.role || '',
+                linkedin: suggestion.linkedin || '',
+                // Blank, and deliberately so: the scan is not allowed to
+                // return an address, and an invented one is worse than none.
+                email: '',
+                phone: '',
+                provenance: 'ai-confirmed' as const,
+                confirmedBy: user?.email || 'unknown',
+                confirmedAt: new Date().toISOString(),
+              },
+            ]
+          : prev.contacts,
+    }));
+  };
+
+  const acceptAllCompanies = () => pendingCompanies.forEach(c => decideCompany(c.name, 'accepted'));
 
   const handleScanWebsite = () => {
     if (!formData.website) return;
@@ -421,24 +545,37 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-medium text-slate-900 dark:text-white">Portfolio Companies</h3>
-                  {isEditing && handleScanWebsite && (
-                    <button
-                      type="button"
-                      onClick={handleScanWebsite}
-                      disabled={!formData.website || isScanning}
-                      className="flex items-center gap-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 px-3 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-50"
-                      title={formData.website ? "Auto-populate portfolio from website using AI" : "Please enter a website first"}
-                    >
-                      {isScanning ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></div> : <Wand2 size={16} />}
-                      Auto-Populate
-                    </button>
-                  )}
                 </div>
-                {isEditing && !formData.website && (
-                  <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800/50">
-                    Please enter a website URL in the Profile tab to use the Auto-Populate feature.
+
+                {scanError && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-400">
+                    {scanError}
                   </p>
                 )}
+
+                <SuggestionPanel
+                  title="Suggested portfolio companies"
+                  count={pendingCompanies.length}
+                  isScanning={isResearching}
+                  scannedAt={formData.lastScanAt}
+                  foundNothing={formData.lastScanFoundNothing}
+                  onRescan={runScan}
+                  onAcceptAll={acceptAllCompanies}
+                >
+                  {pendingCompanies.map(sugg => (
+                    <SuggestionRow
+                      key={sugg.name}
+                      primary={sugg.name}
+                      secondary={
+                        lookupCompany(sugg.name, companyIndex)
+                          ? 'Already in your CRM'
+                          : sugg.evidence
+                      }
+                      onAccept={() => decideCompany(sugg.name, 'accepted')}
+                      onDismiss={() => decideCompany(sugg.name, 'dismissed')}
+                    />
+                  ))}
+                </SuggestionPanel>
                 <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
                   {isEditing ? (
                     <div>
@@ -479,16 +616,36 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                   ) : (
                     <div className="flex flex-wrap gap-3">
                       {formData.portfolioCompanies && formData.portfolioCompanies.length > 0 ? formData.portfolioCompanies.map((company, idx) => {
-                        const inCRM = companies.find(c => c.name.toLowerCase() === company.toLowerCase() || company.toLowerCase().includes(c.name.toLowerCase()) || c.name.toLowerCase().includes(company.toLowerCase()));
+                        // Whole-name match, never substring: see companyMatch.ts.
+                        // The old test linked "AI" to "OpenAI".
+                        const inCRM = lookupCompany(company, companyIndex);
+                        const clickable = inCRM && onCompanyClick;
+                        const Tag = clickable ? 'button' : 'div';
                         return (
-                        <div key={idx} className={cn(
-                          "inline-flex items-center gap-2 px-4 py-2 rounded-xl border shadow-sm transition-shadow cursor-default",
-                          inCRM ? "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800" : "bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800 hover:shadow-md"
-                        )}>
+                        <Tag
+                          key={idx}
+                          {...(clickable
+                            ? {
+                                type: 'button' as const,
+                                onClick: () => onCompanyClick!(inCRM!),
+                                title: `Open ${inCRM!.name}`,
+                              }
+                            : {})}
+                          className={cn(
+                            "inline-flex items-center gap-2 px-4 py-2 rounded-xl border shadow-sm text-left transition-all",
+                            inCRM
+                              ? "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800"
+                              : "bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800",
+                            clickable
+                              ? "cursor-pointer hover:-translate-y-px hover:border-indigo-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              : "cursor-default"
+                          )}
+                        >
                           <Briefcase size={14} className={inCRM ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"} />
                           <span className={cn("font-medium text-sm", inCRM ? "text-indigo-900 dark:text-indigo-200" : "text-slate-700 dark:text-slate-300")}>{company}</span>
                           {inCRM && <span className="ml-1 text-[10px] uppercase font-bold text-indigo-500 bg-indigo-100 dark:bg-indigo-900/50 px-1.5 py-0.5 rounded">In CRM</span>}
-                        </div>
+                          {clickable && <ArrowUpRight size={13} className="text-indigo-400" />}
+                        </Tag>
                       )}) : <span className="text-sm text-slate-500 italic">No portfolio companies listed.</span>}
                     </div>
                   )}
@@ -514,6 +671,34 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                     </button>
                   )}
                 </div>
+
+                <SuggestionPanel
+                  title="People who may work here"
+                  count={pendingPeople.length}
+                  isScanning={isResearching}
+                  scannedAt={formData.lastScanAt}
+                  foundNothing={formData.lastScanFoundNothing}
+                  onRescan={runScan}
+                >
+                  {pendingPeople.map(person => (
+                    <SuggestionRow
+                      key={person.name}
+                      primary={person.name}
+                      secondary={person.role}
+                      link={person.linkedin}
+                      onAccept={() => decidePerson(person, 'accepted')}
+                      onDismiss={() => decidePerson(person, 'dismissed')}
+                    />
+                  ))}
+                </SuggestionPanel>
+
+                {pendingPeople.length > 0 && (
+                  <p className="-mt-3 text-[11.5px] text-slate-400">
+                    Adding someone brings across their name, title and LinkedIn. Email is left blank
+                    on purpose — the research step is not allowed to return one, because a plausible
+                    wrong address is the kind of mistake nobody catches until mail has gone out.
+                  </p>
+                )}
                 {(!formData.contacts || formData.contacts.length === 0) ? (
                   <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-8 text-center shadow-sm">
                     <p className="text-sm text-slate-500 dark:text-slate-400">No contacts added yet.</p>
@@ -607,8 +792,28 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                         </div>
                       ) : (
                         <div key={contact.id} className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
-                          <h4 className="font-semibold text-slate-900 dark:text-white text-base mb-1">{contact.name || 'Unnamed Contact'}</h4>
+                          <div className="mb-1 flex items-start gap-2">
+                            <h4 className="flex-1 font-semibold text-slate-900 dark:text-white text-base">{contact.name || 'Unnamed Contact'}</h4>
+                            {contact.provenance === 'ai-confirmed' && (
+                              <span
+                                title={`Found by research, confirmed by ${contact.confirmedBy || 'a teammate'}${contact.confirmedAt ? ' on ' + new Date(contact.confirmedAt).toLocaleDateString() : ''}`}
+                                className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                              >
+                                <Sparkles size={10} /> AI
+                              </span>
+                            )}
+                          </div>
                           {contact.role && <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 mb-4">{contact.role}</p>}
+                          {contact.linkedin && (
+                            <a
+                              href={contact.linkedin}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-indigo-600 dark:text-slate-300"
+                            >
+                              <ExternalLink size={14} className="text-slate-400" /> LinkedIn
+                            </a>
+                          )}
                           <div className="space-y-2">
                             {contact.email && (
                               <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">

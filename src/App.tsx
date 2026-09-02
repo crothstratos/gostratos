@@ -184,7 +184,7 @@ function AppContent() {
               />
             )}
             {activeTab === 'fundraising' && <FundraisingCRM />}
-            {activeTab === 'investors' && <InvestorsTab />}
+            {activeTab === 'investors' && <InvestorsTab onCompanyClick={setSelectedCompany} />}
             {activeTab === 'shortlist' && <ShortlistTab companies={companies} onCompanyClick={setSelectedCompany} onUpdateCompany={handleSaveCompany} />}
             {activeTab === 'search' && <SearchTab companies={companies} />}
           </Suspense>
@@ -195,6 +195,8 @@ function AppContent() {
         {selectedCompany && (
           <CompanyModal
             company={selectedCompany}
+            companies={companies}
+            onCompanyClick={setSelectedCompany}
             onClose={() => setSelectedCompany(null)}
             onSave={handleSaveCompany}
             onDelete={handleDeleteCompany}

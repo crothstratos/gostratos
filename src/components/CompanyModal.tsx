@@ -17,6 +17,7 @@ import { CompanyConversations } from './CompanyConversations';
 import { DecisionTab } from './DecisionTab';
 import { LocationInput } from './LocationInput';
 import { CoInvestorNetwork } from './CoInvestorNetwork';
+import { CompanyNetworkPanel } from './CompanyNetworkPanel';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { format, parseISO } from 'date-fns';
@@ -28,9 +29,17 @@ interface CompanyModalProps {
   onDelete?: (companyId: string) => void;
   onAddEvent?: (event: CalendarEvent) => void;
   onRefreshEvents?: () => void;
+  /**
+   * The full company list, for the Network tab's shared-investor lookup.
+   * Passed in rather than re-subscribed here: App already holds it, and a
+   * second Firestore listener per open modal is pure waste.
+   */
+  companies?: Company[];
+  /** Opens another company from the Network tab. */
+  onCompanyClick?: (company: Company) => void;
 }
 
-export const CompanyModal = React.memo(function CompanyModal({ company, onClose, onSave, onDelete, onAddEvent, onRefreshEvents }: CompanyModalProps) {
+export const CompanyModal = React.memo(function CompanyModal({ company, onClose, onSave, onDelete, onAddEvent, onRefreshEvents, companies = [], onCompanyClick }: CompanyModalProps) {
   const { user, accessToken } = useAuth();
   const { investors } = useInvestors();
   const [formData, setFormData] = useState<Company | null>(null);
@@ -1809,7 +1818,21 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
           )}
 
           {activeTab === 'network' && formData && (
-            <div className="pt-2">
+            <div className="space-y-8 pt-2">
+              {/*
+                What the CRM already knows, above what AI can guess. The panel
+                below is derived from the investor repository and the company
+                list, so it is right by construction; CoInvestorNetwork is a
+                research tool, and research goes second.
+              */}
+              <CompanyNetworkPanel
+                company={formData}
+                investorFirms={investors}
+                companies={companies}
+                onCompanyClick={onCompanyClick}
+              />
+
+              <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
               <CoInvestorNetwork 
                 company={formData} 
                 investors={investors} 
@@ -1818,6 +1841,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
                   onSave(updatedCompany); // also save to backend immediately
                 }}
               />
+              </div>
             </div>
           )}
 
