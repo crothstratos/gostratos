@@ -3,7 +3,6 @@ import { InvestorRepositoryEntry, Company, PortfolioSuggestion, PersonSuggestion
 import { Plus, X, Building2, Globe, MapPin, Edit2, Check, DollarSign, Target, Briefcase, Mail, Phone, ExternalLink, Clock, Trash2, Wand2, Sparkles, ArrowUpRight } from 'lucide-react';
 import { LocationInput } from './LocationInput';
 import { cn } from '../utils';
-import { useGemini } from '../hooks/useGemini';
 import { useCompanies } from '../hooks/useCompanies';
 import { useFirmScan } from '../hooks/useFirmScan';
 import { buildCompanyIndex, lookupCompany } from '../companyMatch';
@@ -22,7 +21,6 @@ interface InvestorModalProps {
 export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew, onCompanyClick }: InvestorModalProps) {
   const { user } = useAuth();
   const { companies } = useCompanies(user);
-  const { isScanning, handleScanWebsite: originalHandleScanWebsite } = useGemini();
   const [isEditing, setIsEditing] = useState(isNew || false);
   const [formData, setFormData] = useState<Partial<InvestorRepositoryEntry>>(investor || {});
   const [activeTab, setActiveTab] = useState<'profile' | 'portfolio' | 'people'>('profile');
@@ -154,21 +152,6 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
 
   const acceptAllCompanies = () => pendingCompanies.forEach(c => decideCompany(c.name, 'accepted'));
 
-  const handleScanWebsite = () => {
-    if (!formData.website) return;
-    
-    originalHandleScanWebsite(formData.website, (data) => {
-      const companies = data.companies || [];
-      const location = data.location || undefined;
-      
-      setFormData(prev => ({
-        ...prev,
-        portfolioCompanies: [...(prev.portfolioCompanies || []), ...companies].filter((v, i, a) => a.indexOf(v) === i),
-        ...(location && !prev.location ? { location } : {})
-      }));
-    });
-  };
-
   const handleSaveForm = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!formData.firmName || formData.firmName.trim() === '') { alert('Firm Name is required.'); return; } onSave(formData);
@@ -299,18 +282,23 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                           placeholder="e.g. sequoiacap.com"
                           className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:text-white"
                         />
-                        {handleScanWebsite && (
-                          <button
-                            type="button"
-                            onClick={handleScanWebsite}
-                            disabled={!formData.website || isScanning}
-                            className="flex items-center gap-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 px-3 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-50"
-                            title="Scan website for portfolio companies"
-                          >
-                            {isScanning ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></div> : <Wand2 size={16} />}
-                            Scan
-                          </button>
-                        )}
+                        {/*
+                          Points at the reviewed path. The previous version
+                          called a different endpoint that wrote its guesses
+                          straight into portfolioCompanies, so two scans on the
+                          same screen behaved differently — one reviewed, one
+                          not — and the unreviewed one was the more prominent.
+                        */}
+                        <button
+                          type="button"
+                          onClick={runScan}
+                          disabled={(!formData.website && !formData.firmName) || isResearching}
+                          className="flex items-center gap-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 px-3 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-50"
+                          title="Research this firm's portfolio and team"
+                        >
+                          {isResearching ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></div> : <Wand2 size={16} />}
+                          Research
+                        </button>
                       </div>
                     </div>
                     <div>
