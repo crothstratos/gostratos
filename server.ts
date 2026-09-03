@@ -10,6 +10,19 @@ import { getAuth } from "firebase-admin/auth";
 import http from "http";
 import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
 
+/**
+ * The Gemini model every endpoint uses.
+ *
+ * One constant, overridable without a deploy. It was previously written out at
+ * each of the ten call sites, which meant changing model was ten edits and one
+ * chance to miss one — the same shape of mistake that once left a quota
+ * message unhandled in a single endpoint nobody thought to check.
+ *
+ * Set GEMINI_MODEL in env.yaml to move the whole app to another model; the
+ * default is the current stable Flash release.
+ */
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+
 // Initialize Firebase Admin if credentials are provided
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -169,7 +182,7 @@ Return the information strictly as a JSON object matching this schema:
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -323,7 +336,7 @@ Rules, which matter more than completeness:
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -508,7 +521,7 @@ Rules:
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -617,7 +630,7 @@ Return the information strictly as a JSON object matching this schema:
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -710,7 +723,7 @@ Rules:
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -882,7 +895,7 @@ field, because a blank one gets asked about and a wrong one gets quoted.
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: contentConfig,
         config: {
           responseMimeType: "application/json",
@@ -920,7 +933,7 @@ Output ONLY the raw description text.
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
       });
 
@@ -941,7 +954,7 @@ Output ONLY the raw description text.
       const ai = getGeminiAI();
       const prompt = `Analyze this VC email (${investorType}):\n${emailContent}\nExtract an array of tasks or next steps based on the context. Return JSON: { "tasks": ["task 1", "task 2"] }`;
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: { responseMimeType: "application/json" },
       });
@@ -1026,7 +1039,7 @@ Instructions:
       `;
 
       const finalResponse = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: finalPrompt,
       });
 
@@ -1069,7 +1082,7 @@ Emails:
 ${transcript}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: { responseMimeType: "application/json" },
       });

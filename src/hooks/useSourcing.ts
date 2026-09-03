@@ -25,6 +25,9 @@ import { normaliseCompanyName, buildCompanyIndex } from '../companyMatch';
 /** Gap between research calls. Enough to stay clear of per-minute limits. */
 const RESEARCH_GAP_MS = 1500;
 
+/** How often the idle loop looks for newly discovered work. */
+const IDLE_POLL_MS = 2500;
+
 /** Same derivation the contacts importer uses, so ids are stable across runs. */
 async function idFor(nameKey: string): Promise<string> {
   const bytes = new TextEncoder().encode(nameKey);
@@ -192,30 +195,57 @@ export function useSourcing(
   }, []);
 
   // --- the queue. Runs only while the tab is open, one at a time.
-  const busy = useRef(false);
+  /**
+   * The queue. One long-lived loop for the life of the tab, rather than an
+   * effect that reschedules itself.
+   *
+   * The obvious shape — an effect keyed on `candidates` that sets a timer for
+   * the next pending row — does not work here, and failed in two different
+   * ways before this. `candidates` changes on every Firestore snapshot, so the
+   * effect tears down and rebuilds constantly: releasing the lock in the
+   * cleanup let two calls run at once, and not releasing it deadlocked the
+   * queue the first time a snapshot landed inside the delay. Discovery writes
+   * a burst of documents, so a snapshot always landed inside the delay, and
+   * nothing was ever researched.
+   *
+   * A loop that reads the current list from a ref has neither problem: it is
+   * the only thing driving the work, it holds no lock, and snapshots cannot
+   * interrupt it.
+   */
+  const candidatesRef = useRef(candidates);
+  useEffect(() => { candidatesRef.current = candidates; }, [candidates]);
+
+  // Rows tried this session. A row whose failure could not be written back —
+  // a permissions problem, say — would otherwise stay pending and be retried
+  // forever, which is an expensive way to keep failing.
+  const attempted = useRef<Set<string>>(new Set());
+
   useEffect(() => {
-    if (!enabled || busy.current) return;
-    const next = candidates.find(c => c.status === 'active' && c.researchState === 'pending');
-    if (!next) return;
+    if (!enabled) return;
+    let stopped = false;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    busy.current = true;
-    let cancelled = false;
+    (async () => {
+      while (!stopped) {
+        const next = candidatesRef.current.find(
+          c => c.status === 'active' && c.researchState === 'pending' && !attempted.current.has(c.id)
+        );
 
-    const timer = setTimeout(async () => {
-      if (cancelled) { busy.current = false; return; }
-      try {
+        if (!next) {
+          await sleep(IDLE_POLL_MS);
+          continue;
+        }
+
+        attempted.current.add(next.id);
         await research(next);
-      } finally {
-        // Cleared only here. An earlier version also cleared it in the effect
-        // cleanup, which runs on every Firestore snapshot — so a snapshot
-        // arriving mid-call unlocked the queue and let a second research start
-        // alongside the first, doubling the spend and racing on the same row.
-        busy.current = false;
+        if (stopped) return;
+        await sleep(RESEARCH_GAP_MS);
       }
-    }, RESEARCH_GAP_MS);
+    })();
 
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [enabled, candidates, research]);
+    return () => { stopped = true; };
+    // `research` is stable (useCallback with no deps), so this runs once.
+  }, [enabled, research]);
 
   const pendingCount = candidates.filter(c => c.status === 'active' && c.researchState === 'pending').length;
 
