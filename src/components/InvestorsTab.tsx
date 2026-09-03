@@ -376,6 +376,9 @@ export const InvestorsTab = React.memo(function InvestorsTab({
           onCompanyClick={onCompanyClick}
           allFirms={investors}
           onAddFirm={(entry) => handleAddInvestor(entry as any)}
+          onPersist={(patch) => {
+            if (editingInvestor) handleUpdateInvestor(editingInvestor.id, patch as any);
+          }}
           onClose={() => setIsModalOpen(false)}
           onSave={(data) => {
              // Adapt the handleSave to match what it expects

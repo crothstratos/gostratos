@@ -33,9 +33,20 @@ interface InvestorModalProps {
   allFirms?: InvestorRepositoryEntry[];
   /** Files a recommended co-investor as a new repository entry. */
   onAddFirm?: (entry: Partial<InvestorRepositoryEntry>) => void;
+  /**
+   * Writes a few fields straight to this firm, without closing the modal and
+   * without touching anything else on the record.
+   *
+   * Accepting a suggestion is a discrete action, not a form edit, so it has to
+   * save itself — the Save button only exists in edit mode, and the review lane
+   * is usable in view mode, which meant an accepted person was applied to the
+   * screen and thrown away on close. A targeted patch rather than a full save
+   * so it cannot commit half-typed edits sitting in other fields.
+   */
+  onPersist?: (patch: Partial<InvestorRepositoryEntry>) => void;
 }
 
-export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew, onCompanyClick, allFirms = [], onAddFirm }: InvestorModalProps) {
+export const InvestorModal = React.memo(function InvestorModal({ investor, onClose, onSave, isNew, onCompanyClick, allFirms = [], onAddFirm, onPersist }: InvestorModalProps) {
   const { user } = useAuth();
   const { companies } = useCompanies(user);
   const [isEditing, setIsEditing] = useState(isNew || false);
@@ -53,6 +64,33 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
   // 6,000 companies matched against a portfolio list is a lot of comparisons to
   // redo on every keystroke, so the lookup is built once per company set.
   const companyIndex = useMemo(() => buildCompanyIndex(companies), [companies]);
+
+  // The scan is async, so by the time it returns, the formData captured in its
+  // closure may be several edits old. This ref is always current.
+  const latest = useRef(formData);
+  useEffect(() => { latest.current = formData; }, [formData]);
+
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (savedAt === null) return;
+    const timer = setTimeout(() => setSavedAt(null), 2500);
+    return () => clearTimeout(timer);
+  }, [savedAt]);
+
+  /**
+   * Applies a change locally and writes it to the record in the same breath.
+   *
+   * A brand-new firm has no document to patch yet, so its changes stay local
+   * until the first save — which is fine, because the Save button is on screen
+   * for a new firm.
+   */
+  const applyAndPersist = (patch: Partial<InvestorRepositoryEntry>) => {
+    setFormData(prev => ({ ...prev, ...patch }));
+    if (!isNew && investor?.id && onPersist) {
+      onPersist(patch);
+      setSavedAt(Date.now());
+    }
+  };
 
   const removePortfolioCompany = (index: number) => {
     setFormData(prev => ({
@@ -79,27 +117,30 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
     if (!result) return;
     setLastPagesRead(result.pagesRead || []);
 
-    setFormData(prev => {
-      const already = new Set((prev.portfolioCompanies || []).map(n => n.toLowerCase().trim()));
-      const decided = new Set((prev.suggestedPortfolioCompanies || []).map(x => x.name.toLowerCase().trim()));
-      const freshCompanies = result.companies.filter(
-        c => !already.has(c.name.toLowerCase().trim()) && !decided.has(c.name.toLowerCase().trim())
-      );
+    // latest.current, not the formData in this closure: the scan takes several
+    // seconds and the record may have moved on while it ran.
+    const current = latest.current;
 
-      const knownPeople = new Set((prev.contacts || []).map(c => (c.name || '').toLowerCase().trim()));
-      const decidedPeople = new Set((prev.suggestedContacts || []).map(x => x.name.toLowerCase().trim()));
-      const freshPeople = result.people.filter(
-        p => !knownPeople.has(p.name.toLowerCase().trim()) && !decidedPeople.has(p.name.toLowerCase().trim())
-      );
+    const already = new Set((current.portfolioCompanies || []).map(n => n.toLowerCase().trim()));
+    const decided = new Set((current.suggestedPortfolioCompanies || []).map(x => x.name.toLowerCase().trim()));
+    const freshCompanies = result.companies.filter(
+      c => !already.has(c.name.toLowerCase().trim()) && !decided.has(c.name.toLowerCase().trim())
+    );
 
-      return {
-        ...prev,
-        suggestedPortfolioCompanies: [...(prev.suggestedPortfolioCompanies || []), ...freshCompanies],
-        suggestedContacts: [...(prev.suggestedContacts || []), ...freshPeople],
-        lastScanAt: new Date().toISOString(),
-        lastScanFoundNothing: freshCompanies.length === 0 && freshPeople.length === 0,
-        ...(result.location && !prev.location ? { location: result.location as any } : {}),
-      };
+    const knownPeople = new Set((current.contacts || []).map(c => (c.name || '').toLowerCase().trim()));
+    const decidedPeople = new Set((current.suggestedContacts || []).map(x => x.name.toLowerCase().trim()));
+    const freshPeople = result.people.filter(
+      p => !knownPeople.has(p.name.toLowerCase().trim()) && !decidedPeople.has(p.name.toLowerCase().trim())
+    );
+
+    // Saved as soon as it lands. A scan costs a grounded model call, so losing
+    // one to a closed modal means paying for it twice.
+    applyAndPersist({
+      suggestedPortfolioCompanies: [...(current.suggestedPortfolioCompanies || []), ...freshCompanies],
+      suggestedContacts: [...(current.suggestedContacts || []), ...freshPeople],
+      lastScanAt: new Date().toISOString(),
+      lastScanFoundNothing: freshCompanies.length === 0 && freshPeople.length === 0,
+      ...(result.location && !current.location ? { location: result.location as any } : {}),
     });
   };
 
@@ -133,49 +174,61 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  const decideCompany = (name: string, status: 'accepted' | 'dismissed') => {
-    setFormData(prev => ({
-      ...prev,
-      suggestedPortfolioCompanies: (prev.suggestedPortfolioCompanies || []).map(x =>
-        x.name === name ? { ...x, status } : x
-      ),
-      portfolioCompanies:
-        status === 'accepted'
-          ? [...(prev.portfolioCompanies || []), name].filter((v, i, a) => a.indexOf(v) === i)
-          : prev.portfolioCompanies,
-    }));
+  /** Accepts or dismisses one or more suggested companies, and saves. */
+  const decideCompanies = (names: string[], status: 'accepted' | 'dismissed') => {
+    const chosen = new Set(names);
+    const current = latest.current;
+
+    const suggestedPortfolioCompanies = (current.suggestedPortfolioCompanies || []).map(x =>
+      chosen.has(x.name) ? { ...x, status } : x
+    );
+
+    const portfolioCompanies =
+      status === 'accepted'
+        ? [...(current.portfolioCompanies || []), ...names].filter((v, i, a) => a.indexOf(v) === i)
+        : (current.portfolioCompanies || []);
+
+    applyAndPersist({ suggestedPortfolioCompanies, portfolioCompanies });
   };
+
+  const decideCompany = (name: string, status: 'accepted' | 'dismissed') =>
+    decideCompanies([name], status);
 
   const decidePerson = (suggestion: PersonSuggestion, status: 'accepted' | 'dismissed') => {
-    setFormData(prev => ({
-      ...prev,
-      suggestedContacts: (prev.suggestedContacts || []).map(x =>
-        x.name === suggestion.name ? { ...x, status } : x
-      ),
-      contacts:
-        status === 'accepted'
-          ? [
-              ...(prev.contacts || []),
-              {
-                id: crypto.randomUUID(),
-                name: suggestion.name,
-                role: suggestion.role || '',
-                // Only ever an address printed on a page the server read. If
-                // none was found this stays blank rather than being guessed.
-                email: suggestion.email || '',
-                emailSourceUrl: suggestion.emailSourceUrl,
-                phone: '',
-                provenance: 'ai-confirmed' as const,
-                sourceUrl: suggestion.sourceUrl,
-                confirmedBy: user?.email || 'unknown',
-                confirmedAt: new Date().toISOString(),
-              },
-            ]
-          : prev.contacts,
-    }));
+    const current = latest.current;
+
+    const suggestedContacts = (current.suggestedContacts || []).map(x =>
+      x.name === suggestion.name ? { ...x, status } : x
+    );
+
+    const contacts =
+      status === 'accepted'
+        ? [
+            ...(current.contacts || []),
+            {
+              id: crypto.randomUUID(),
+              name: suggestion.name,
+              role: suggestion.role || '',
+              // Only ever an address printed on a page the server read. If
+              // none was found this stays blank rather than being guessed.
+              email: suggestion.email || '',
+              emailSourceUrl: suggestion.emailSourceUrl,
+              phone: '',
+              provenance: 'ai-confirmed' as const,
+              sourceUrl: suggestion.sourceUrl,
+              confirmedBy: user?.email || 'unknown',
+              confirmedAt: new Date().toISOString(),
+            },
+          ]
+        : (current.contacts || []);
+
+    applyAndPersist({ suggestedContacts, contacts });
   };
 
-  const acceptAllCompanies = () => pendingCompanies.forEach(c => decideCompany(c.name, 'accepted'));
+  // One write, not one per company: a loop of single accepts would each read
+  // the same stale state and the last would overwrite the rest.
+  const acceptAllCompanies = () =>
+    decideCompanies(pendingCompanies.map(c => c.name), 'accepted');
 
   const openPerson: InvestorContact | undefined =
     (formData.contacts || []).find(c => c.id === openPersonId);
@@ -287,6 +340,20 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
               {TAB_LABELS[tab]}
             </button>
           ))}
+
+          {/*
+            Accepting a suggestion writes straight to the record, which is
+            invisible without saying so — and this feature already lost a
+            teammate's work once by looking like it had saved when it had not.
+          */}
+          {savedAt !== null && (
+            <span
+              key={savedAt}
+              className="ml-auto mr-6 self-center text-[11.5px] font-medium text-emerald-600 dark:text-emerald-400"
+            >
+              Saved
+            </span>
+          )}
         </div>
 
         {/* Content */}
