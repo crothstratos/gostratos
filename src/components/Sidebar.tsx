@@ -1,11 +1,11 @@
 import React from 'react';
-import { Briefcase, LayoutDashboard, SearchCode, FileSearch, Calendar as CalendarIcon, LineChart, Moon, Sun, Users, LogOut, X, Star, Share2, Contact2, Compass } from 'lucide-react';
+import { Briefcase, LayoutDashboard, SearchCode, FileSearch, Calendar as CalendarIcon, LineChart, Moon, Sun, Users, LogOut, X, Star, Share2, Contact2, Compass, Radio } from 'lucide-react';
 import { cn } from '../utils';
 import { useTheme } from './ThemeContext';
 import { useAuth } from './AuthContext';
 import { StratosLogo } from './StratosLogo';
 
-export type TabType = 'crm' | 'stats' | 'sourcing' | 'people' | 'referrals' | 'dd' | 'calendar' | 'portfolio' | 'fundraising' | 'investors' | 'shortlist' | 'search';
+export type TabType = 'crm' | 'stats' | 'signals' | 'sourcing' | 'people' | 'referrals' | 'dd' | 'calendar' | 'portfolio' | 'fundraising' | 'investors' | 'shortlist' | 'search';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -63,6 +63,16 @@ export const Sidebar = React.memo(function Sidebar({ activeTab, setActiveTab, is
           >
             <LineChart size={16} className={activeTab === 'stats' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
             Stats
+          </button>
+          <button
+            onClick={() => { setActiveTab('signals'); setIsOpen(false); }}
+            className={cn(
+              "relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150",
+              activeTab === 'signals' ? "bg-white text-slate-900 shadow-sm before:absolute before:-left-2.5 before:top-2 before:bottom-2 before:w-[2px] before:rounded-r before:bg-indigo-600 dark:bg-slate-800 dark:text-white dark:before:bg-indigo-400" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
+            )}
+          >
+            <Radio size={16} className={activeTab === 'signals' ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-slate-500"} />
+            Signals
           </button>
           <button
             onClick={() => { setActiveTab('sourcing'); setIsOpen(false); }}

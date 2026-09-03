@@ -20,6 +20,7 @@ const CalendarView = React.lazy(() => import('./components/CalendarView').then(m
 const FundraisingCRM = React.lazy(() => import('./components/FundraisingCRM').then(module => ({ default: module.FundraisingCRM })));
 const InvestorsTab = React.lazy(() => import('./components/InvestorsTab').then(module => ({ default: module.InvestorsTab })));
 const SourcingTab = React.lazy(() => import('./components/SourcingTab').then(module => ({ default: module.SourcingTab })));
+const SignalsTab = React.lazy(() => import('./components/SignalsTab').then(module => ({ default: module.SignalsTab })));
 const ShortlistTab = React.lazy(() => import('./components/ShortlistTab').then(module => ({ default: module.ShortlistTab })));
 const SearchTab = React.lazy(() => import('./components/SearchTab').then(module => ({ default: module.SearchTab })));
 const CompanyModal = React.lazy(() => import('./components/CompanyModal').then(module => ({ default: module.CompanyModal })));
@@ -186,6 +187,9 @@ function AppContent() {
             )}
             {activeTab === 'fundraising' && <FundraisingCRM />}
             {activeTab === 'investors' && <InvestorsTab onCompanyClick={setSelectedCompany} />}
+            {activeTab === 'signals' && (
+              <SignalsTab companies={companies} onCompanyClick={setSelectedCompany} />
+            )}
             {activeTab === 'sourcing' && (
               <SourcingTab companies={companies} onAddCompany={handleAddCompany} />
             )}

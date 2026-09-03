@@ -1,0 +1,32 @@
+# Scheduled jobs. Deploy separately from the app:
+#
+#   gcloud app deploy cron.yaml
+#
+# App Engine calls these URLs on the schedule below with an
+# X-Appengine-Cron: true header, which it strips from any request arriving
+# from outside — that header is what authenticates them, so the matching
+# check in server.ts must stay pinned to the /api/cron/ prefix.
+
+cron:
+  - description: >-
+      Snapshot every investor's portfolio and report what changed. Monthly,
+      because portfolios move on the timescale of funding announcements and a
+      daily run would mostly record that nothing happened.
+    url: /api/cron/portfolio-snapshot
+    schedule: 1 of month 06:00
+    timezone: America/Chicago
+
+  - description: >-
+      Re-read the websites of companies we are actively tracking and report
+      what changed on them.
+    url: /api/cron/site-diff
+    schedule: every monday 06:30
+    timezone: America/Chicago
+
+  - description: >-
+      Check where the founders and firm contacts in our graph currently work.
+      Runs weekly and takes a slice each time rather than the whole list, so
+      the cost is bounded and predictable.
+    url: /api/cron/people-watch
+    schedule: every wednesday 06:30
+    timezone: America/Chicago

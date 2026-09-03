@@ -9,6 +9,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
 import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
+import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck } from "./cronJobs.ts";
 
 /**
  * The Gemini model every endpoint uses.
@@ -69,7 +70,24 @@ async function startServer() {
     "joe@highwayventures.com",
   ]);
 
+  /**
+   * Scheduled jobs authenticate differently from people.
+   *
+   * App Engine sets X-Appengine-Cron on requests it originates and strips the
+   * header from anything arriving off the internet, so its presence is proof
+   * the request came from the scheduler. That is the documented mechanism and
+   * the only thing standing between /api/cron and the open web — hence the
+   * path check: this exemption must never widen to the rest of the API.
+   */
+  const isCronRequest = (req: any) =>
+    req.get("X-Appengine-Cron") === "true" && req.path.startsWith("/cron/");
+
   app.use("/api", async (req, res, next) => {
+    if (isCronRequest(req)) {
+      (req as any).isCron = true;
+      return next();
+    }
+
     if (!getApps().length) {
       if (process.env.NODE_ENV === "production") {
         console.error("Firebase Admin is not initialised — refusing API requests.");
@@ -121,6 +139,10 @@ async function startServer() {
   const rateBuckets = new Map<string, { start: number; count: number }>();
 
   app.use("/api", (req, res, next) => {
+    // The scheduler is not a user and paces itself; the ceiling here would
+    // stop a job part way through and leave the run half-done.
+    if ((req as any).isCron) return next();
+
     const uid = (req as any).user?.uid || "unknown";
     const now = Date.now();
 
@@ -823,6 +845,117 @@ Rules:
     } catch (error) {
       console.error("Error enriching company:", error);
       res.status(500).json({ error: "Failed to research company" });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Scheduled jobs. Authenticated by App Engine's X-Appengine-Cron header,
+  // which it strips from external requests — see the gate above.
+  //
+  // Each returns what it did rather than an empty 200, so a run can be read
+  // in the logs without instrumenting anything: "scanned 10, wrote 3" is the
+  // difference between a job that works and one that silently does nothing,
+  // which is exactly how the sourcing queue managed to never run at all.
+  // ─────────────────────────────────────────────────────────────────────
+
+  // app.all, because App Engine cron issues GET. POST is accepted too so a
+  // run can be triggered by hand from an authenticated session while testing.
+  app.all("/api/cron/portfolio-snapshot", async (_req, res) => {
+    try {
+      const result = await runPortfolioSnapshot(getDb());
+      console.log("[cron] portfolio-snapshot", JSON.stringify(result));
+      res.json(result);
+    } catch (error: any) {
+      console.error("[cron] portfolio-snapshot failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.all("/api/cron/site-diff", async (_req, res) => {
+    try {
+      const result = await runSiteDiff(getDb());
+      console.log("[cron] site-diff", JSON.stringify(result));
+      res.json(result);
+    } catch (error: any) {
+      console.error("[cron] site-diff failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Checks where a slice of the people in our graph currently work.
+   *
+   * A small batch on purpose: this is the only job that spends a grounded call
+   * per row, and covering everyone every week would be both expensive and
+   * pointless — people do not change jobs weekly. Least-recently-checked
+   * first, so the whole list is covered over a couple of months.
+   */
+  app.all("/api/cron/people-watch", async (_req, res) => {
+    const BATCH = 12;
+    const summary = { job: "people-watch", scanned: 0, signals: 0, notes: [] as string[] };
+
+    try {
+      const db = getDb();
+      const ai = getGeminiAI();
+      const due = await peopleDueForCheck(db, BATCH);
+
+      for (const person of due) {
+        summary.scanned++;
+        try {
+          const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: `
+Using web search, determine where ${person.name} currently works. Our records
+say ${person.org}.
+
+Answer only from what you can actually verify in search results. This is used
+to decide whether to contact someone, so a confident wrong answer is worse
+than no answer:
+
+- currentOrg: the organisation they work at now. Leave empty if unsure.
+- changed: true ONLY if you found clear evidence they have left ${person.org}.
+  Absence of evidence is not evidence of a move — if you simply cannot find
+  them, changed is false.
+- sourceUrl: the page you based this on.
+- confidence: "high" only when a specific dated source says so.
+`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  currentOrg: { type: Type.STRING },
+                  changed: { type: Type.BOOLEAN },
+                  sourceUrl: { type: Type.STRING },
+                  confidence: { type: Type.STRING },
+                },
+              },
+              tools: [{ googleSearch: {} }],
+            },
+          });
+
+          let text = (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
+          const verdict = JSON.parse(text);
+
+          const wrote = await recordPersonCheck(db, person, {
+            movedTo: typeof verdict.currentOrg === "string" ? verdict.currentOrg.trim() : undefined,
+            sourceUrl: typeof verdict.sourceUrl === "string" ? verdict.sourceUrl.trim() : undefined,
+            confident: verdict.changed === true && verdict.confidence === "high",
+          });
+          if (wrote) summary.signals++;
+        } catch (err: any) {
+          summary.notes.push(`${person.name}: ${err.message}`);
+        }
+
+        // Paced for the same reason the sourcing queue is: grounded calls
+        // rate-limit, and a burst fails rather than going faster.
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+
+      console.log("[cron] people-watch", JSON.stringify(summary));
+      res.json(summary);
+    } catch (error: any) {
+      console.error("[cron] people-watch failed:", error);
+      res.status(500).json({ error: error.message, ...summary });
     }
   });
 

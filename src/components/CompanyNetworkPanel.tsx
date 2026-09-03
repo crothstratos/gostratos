@@ -128,7 +128,7 @@ export function CompanyNetworkPanel({
           icon={<Handshake className="h-4 w-4 text-emerald-500" />}
           title="Ways in"
           count={introPaths.length}
-          hint="Ordered by how direct the route is. The top one is your best ask."
+          hint="Ordered by how direct the route is and how recently we spoke. A route through a firm nobody has contacted in a year sinks."
         >
           {introPaths.slice(0, 12).map((path, i) => {
             const style = PATH_STYLE[path.kind];
@@ -145,6 +145,14 @@ export function CompanyNetworkPanel({
                   <span className="block truncate text-[13px] font-medium text-slate-900 dark:text-white">{path.via}</span>
                   <span className="block truncate text-[11.5px] text-slate-400">{path.because}</span>
                 </span>
+                {path.staleDays !== null && path.staleDays > 365 && (
+                  <span
+                    title="No contact logged with this firm in over a year"
+                    className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                  >
+                    Cold
+                  </span>
+                )}
                 {path.email && (
                   <a
                     href={`mailto:${path.email}`}

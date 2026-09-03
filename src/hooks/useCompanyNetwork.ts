@@ -32,8 +32,43 @@ export interface IntroPath {
   because: string;
   /** Lower is a shorter path. Used for ordering. */
   strength: number;
+  /**
+   * Days since we last logged anything with this relationship, or null when
+   * there is nothing on file. Directness alone overstates a path through
+   * someone nobody has spoken to in three years.
+   */
+  staleDays: number | null;
+  /** Ordering key: directness adjusted for how cold the relationship is. */
+  score: number;
   email?: string;
   firmId?: string;
+}
+
+/** Days since the most recent dated note on a firm, or null. */
+function daysSinceLastTouch(firm: InvestorRepositoryEntry): number | null {
+  let newest: number | null = null;
+  for (const note of firm.profileNotes || []) {
+    const t = new Date(note.timestamp || '').getTime();
+    // The Excel-serial corruption put a lot of dates on 1970. Treating one of
+    // those as a recent conversation would make a dead relationship look warm.
+    if (!Number.isFinite(t) || new Date(t).getUTCFullYear() <= 1970) continue;
+    if (newest === null || t > newest) newest = t;
+  }
+  if (newest === null) return null;
+  return Math.floor((Date.now() - newest) / 86400000);
+}
+
+/**
+ * Turns directness plus recency into one ordering number, lower being better.
+ *
+ * A path is penalised as it ages rather than being hidden: a cold relationship
+ * is still a relationship, and the person reading this can decide. Six months
+ * costs about as much as one step of indirectness, which roughly matches how
+ * much a warm introduction actually decays.
+ */
+function pathScore(strength: number, staleDays: number | null): number {
+  if (staleDays === null) return strength + 1.5;      // nothing logged: unknown, not warm
+  return strength + Math.min(staleDays / 180, 3);
 }
 
 export interface CompanyNetwork {
@@ -73,19 +108,29 @@ export function useCompanyNetwork(
         via: r.name,
         because: 'Referred this company to us',
         strength: 0,
+        staleDays: null,
+        score: 0,   // the shortest path there is; nothing outranks it
         email: r.email,
       });
     }
 
     // 2. A named person at a firm that already backs them.
     for (const { firm, people } of investors) {
+      const staleDays = daysSinceLastTouch(firm);
+      const freshness =
+        staleDays === null ? 'no contact logged'
+        : staleDays < 60 ? `spoke ${staleDays} days ago`
+        : `last logged ${Math.round(staleDays / 30)} months ago`;
+
       for (const person of people) {
         if (!person.name) continue;
         paths.push({
           kind: 'investorContact',
           via: person.name,
-          because: `${person.role ? person.role + ' at ' : 'At '}${firm.firmName}, which is an investor`,
+          because: `${person.role ? person.role + ' at ' : 'At '}${firm.firmName} — investor, ${freshness}`,
           strength: 1,
+          staleDays,
+          score: pathScore(1, staleDays),
           email: person.email || undefined,
           firmId: firm.id,
         });
@@ -95,8 +140,10 @@ export function useCompanyNetwork(
         paths.push({
           kind: 'investorFirm',
           via: firm.firmName,
-          because: 'Backs this company; no named contact on file yet',
+          because: `Backs this company; no named contact on file — ${freshness}`,
           strength: 2,
+          staleDays,
+          score: pathScore(2, staleDays),
           firmId: firm.id,
         });
       }
@@ -113,11 +160,14 @@ export function useCompanyNetwork(
           return match && match.id !== company.id && match.vertical === company.vertical;
         });
         if (overlap.length === 0) continue;
+        const staleDays = daysSinceLastTouch(firm);
         paths.push({
           kind: 'coInvestor',
           via: firm.firmName,
           because: `Invests in ${company.vertical} — holds ${overlap.slice(0, 3).join(', ')}${overlap.length > 3 ? ` +${overlap.length - 3}` : ''}`,
           strength: 3,
+          staleDays,
+          score: pathScore(3, staleDays),
           firmId: firm.id,
         });
       }
@@ -141,7 +191,9 @@ export function useCompanyNetwork(
       coPortfolio.sort((a, b) => b.sharedFirms.length - a.sharedFirms.length);
     }
 
-    paths.sort((a, b) => a.strength - b.strength || a.via.localeCompare(b.via));
+    // Ordered by the adjusted score, not raw directness: a named contact at a
+    // firm nobody has spoken to in two years should sit below a fresher route.
+    paths.sort((a, b) => a.score - b.score || a.via.localeCompare(b.via));
 
     return { investors, introPaths: paths, coPortfolio };
   }, [company, investorFirms, companies]);

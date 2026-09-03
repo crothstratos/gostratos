@@ -54,7 +54,8 @@ service cloud.firestore {
     // fail with "Missing or insufficient permissions" on that collection.
     //
     // Collections in use: attachments, audit, companies, company_data_pool,
-    // contacts, events, investor_repository, investors, sourcing.
+    // contacts, events, investor_repository, investors, sourcing, signals,
+    // portfolio_snapshots, site_snapshots, people_watch.
 
     match /companies/{id} {
       allow read, write: if hasAccess();
@@ -99,6 +100,33 @@ service cloud.firestore {
     // of anything a person authored.
     match /sourcing/{id} {
       allow read, write: if hasAccess();
+    }
+
+    // Written by the scheduled jobs through the Admin SDK, which bypasses
+    // these rules. The browser only ever marks one seen or dismissed, so it
+    // gets read and update and nothing else: a feed of what happened stops
+    // being that the moment somebody can author an entry in it.
+    match /signals/{id} {
+      allow read, update: if hasAccess();
+      allow create, delete: if false;
+    }
+
+    // Job state and history. Read-only from the browser — these are the
+    // baselines every signal is measured against, and an edit here would
+    // quietly change what "changed" means.
+    match /portfolio_snapshots/{id} {
+      allow read: if hasAccess();
+      allow write: if false;
+    }
+
+    match /site_snapshots/{id} {
+      allow read: if hasAccess();
+      allow write: if false;
+    }
+
+    match /people_watch/{id} {
+      allow read: if hasAccess();
+      allow write: if false;
     }
 
     // Append-only, and this time it actually is: nothing else matches these

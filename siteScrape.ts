@@ -200,6 +200,15 @@ export function htmlToText(html: string): string {
 
 /** Finds links on a page that look like they lead to the people who work there. */
 export function findTeamLinks(html: string, baseUrl: string): string[] {
+  return findLinks(html, baseUrl, TEAM_HINTS);
+}
+
+/** Ranks a page's outbound links against a hint set and returns the best few. */
+export function findLinks(
+  html: string,
+  baseUrl: string,
+  hints: { word: string; weight: number }[]
+): string[] {
   const scored: { url: string; score: number }[] = [];
   const seen = new Set<string>();
 
@@ -227,7 +236,7 @@ export function findTeamLinks(html: string, baseUrl: string): string[] {
     const path = absolute.toLowerCase();
     const labelSlug = label.replace(/\s+/g, '-');
     let score = 0;
-    for (const { word, weight } of TEAM_HINTS) {
+    for (const { word, weight } of hints) {
       if (path.includes('/' + word)) score += weight;
       if (labelSlug === word) score += weight;
       else if (label.includes(word)) score += Math.ceil(weight / 3);
@@ -249,6 +258,34 @@ export function findTeamLinks(html: string, baseUrl: string): string[] {
  * and the caller falls back to search rather than treating it as an error.
  */
 export async function fetchFirmPages(website: string): Promise<FetchedPage[]> {
+  return fetchPagesFor(website, TEAM_HINTS);
+}
+
+/**
+ * The pages worth re-reading on a company you are tracking.
+ *
+ * A different question from "who works here": careers pages growing is a
+ * hiring signal, pricing pages changing is a business-model signal, and the
+ * team page losing a name is the one that matters most and is hardest to hear
+ * about any other way.
+ */
+export const WATCH_HINTS: { word: string; weight: number }[] = [
+  { word: 'careers', weight: 6 },
+  { word: 'jobs', weight: 6 },
+  { word: 'pricing', weight: 6 },
+  { word: 'plans', weight: 5 },
+  { word: 'team', weight: 5 },
+  { word: 'our-team', weight: 5 },
+  { word: 'about', weight: 2 },
+  { word: 'customers', weight: 2 },
+  { word: 'blog', weight: 1 },
+];
+
+/** Fetches a site's homepage plus the pages its links suggest, by hint set. */
+export async function fetchPagesFor(
+  website: string,
+  hints: { word: string; weight: number }[]
+): Promise<FetchedPage[]> {
   let root = website.trim();
   if (!/^https?:\/\//i.test(root)) root = 'https://' + root;
   if (!isSafePublicUrl(root)) return [];
@@ -262,7 +299,7 @@ export async function fetchFirmPages(website: string): Promise<FetchedPage[]> {
     emails: extractEmails(homeHtml),
   }];
 
-  const links = findTeamLinks(homeHtml, root);
+  const links = findLinks(homeHtml, root, hints);
   const fetched = await Promise.all(links.map(async link => {
     const html = await fetchText(link);
     return html

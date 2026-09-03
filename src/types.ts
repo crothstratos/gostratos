@@ -303,6 +303,56 @@ export interface SourcingCandidate {
   researchNote?: string;
 }
 
+/**
+ * Something changed that somebody should look at.
+ *
+ * Signals are produced by scheduled jobs, never by a person, and they are
+ * events rather than records: each one describes a change at a moment, and
+ * stays true even after the underlying thing changes again. That is the point
+ * of keeping them — a CRM that only stores current state cannot tell you a
+ * firm started buying into a sector, only that it holds those positions now.
+ */
+export type SignalKind =
+  | 'portfolio-addition'
+  | 'sector-rotation'
+  | 'site-change'
+  | 'person-moved';
+
+export interface Signal {
+  id: string;
+  kind: SignalKind;
+  /** One line, written for a person scanning a feed. */
+  headline: string;
+  /** The supporting detail, including what it was compared against. */
+  detail?: string;
+  /** How much this deserves attention. Derived, never typed. */
+  weight: number;
+
+  /** What it is about, for linking through. */
+  companyId?: string;
+  companyName?: string;
+  firmId?: string;
+  firmName?: string;
+  personName?: string;
+
+  /** Where the claim came from, when there is a page to point at. */
+  sourceUrl?: string;
+
+  occurredAt: string;
+  status: 'new' | 'seen' | 'dismissed';
+}
+
+/** One firm's portfolio as it stood on a date. The raw material for rotation. */
+export interface PortfolioSnapshot {
+  id: string;
+  firmId: string;
+  firmName: string;
+  takenAt: string;
+  /** Period key, e.g. "2026-09". One snapshot per firm per period. */
+  period: string;
+  companies: string[];
+}
+
 /** A firm that has shared a cap table with one of ours. */
 export interface CoInvestorSuggestion {
   firmName: string;
