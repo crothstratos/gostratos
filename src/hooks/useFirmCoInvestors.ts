@@ -18,13 +18,14 @@ export function useFirmCoInvestors() {
   /** How many firms the research named, and how many lacked a shared deal. */
   const [diagnostics, setDiagnostics] = useState<{ returned: number; dropped: number; companiesExamined?: string[] } | null>(null);
 
+  /** Returns how many co-investors were found, or null if it could not run. */
   const discover = async (opts: {
     firmName: string;
     website?: string;
     portfolioCompanies?: string[];
     knownFirms?: string[];
-  }) => {
-    if (!opts.firmName) return;
+  }): Promise<number | null> => {
+    if (!opts.firmName) return null;
     setIsSearching(true);
     setError(null);
     try {
@@ -50,6 +51,7 @@ export function useFirmCoInvestors() {
       setResults(rows);
       setDiagnostics(data.diagnostics || null);
       setHasRun(true);
+      return rows.length;
     } catch (err: any) {
       const message = err.message || 'Unknown error';
       if (/quota|429|exhausted/i.test(message)) {
@@ -59,6 +61,7 @@ export function useFirmCoInvestors() {
       } else {
         setError(`Could not research co-investors: ${message}`);
       }
+      return null;
     } finally {
       setIsSearching(false);
     }

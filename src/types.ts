@@ -398,6 +398,14 @@ export interface InvestorRepositoryEntry {
   suggestedContacts?: PersonSuggestion[];
   /** When the firm was last scanned, so it is not re-scanned on every open. */
   lastScanAt?: string;
+  /**
+   * When co-investor research last ran on this firm, and how many firms it
+   * turned up. Recorded so the repository can show at a glance which firms
+   * have been worked through — nine grounded calls per run is not something to
+   * repeat because nobody could remember whether it had been done.
+   */
+  coInvestorsResearchedAt?: string;
+  coInvestorsFound?: number;
   /** Set when a scan produced nothing, to distinguish "not scanned" from "nothing found". */
   lastScanFoundNothing?: boolean;
 }

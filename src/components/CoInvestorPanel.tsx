@@ -15,22 +15,30 @@ export function CoInvestorPanel({
   firm,
   allFirms,
   onAdd,
+  onResearched,
 }: {
   firm: Partial<InvestorRepositoryEntry>;
   allFirms: InvestorRepositoryEntry[];
   /** Adds a recommended firm to the repository as a new entry. */
   onAdd?: (suggestion: CoInvestorSuggestion) => void;
+  /** Records that this firm has now been worked through, and with what result. */
+  onResearched?: (found: number) => void;
 }) {
   const { results, discover, isSearching, error, hasRun, diagnostics } = useFirmCoInvestors();
   const [added, setAdded] = React.useState<Set<string>>(new Set());
 
-  const run = () =>
-    discover({
+  const run = async () => {
+    const found = await discover({
       firmName: firm.firmName || '',
       website: firm.website,
       portfolioCompanies: firm.portfolioCompanies || [],
       knownFirms: allFirms.map(f => f.firmName),
     });
+    // Recorded even when the answer is zero: "we looked and found nothing" is
+    // a result, and marking only successful runs would leave the firms most
+    // worth revisiting looking untouched.
+    if (found !== null && onResearched) onResearched(found);
+  };
 
   return (
     <div className="space-y-4">

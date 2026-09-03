@@ -980,6 +980,12 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                 firm={formData}
                 allFirms={allFirms}
                 onAdd={handleAddCoInvestor}
+                onResearched={(found) =>
+                  applyAndPersist({
+                    coInvestorsResearchedAt: new Date().toISOString(),
+                    coInvestorsFound: found,
+                  })
+                }
               />
             )}
           </form>

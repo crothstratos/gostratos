@@ -7,7 +7,7 @@ import { InvestorModal } from './InvestorModal';
 import { useGemini } from '../hooks/useGemini';
 import { useInvestors } from '../hooks/useInvestors';
 import { useStaleInvestors } from '../hooks/useInvestorFit';
-import { AlertCircle, ChevronRight } from 'lucide-react';
+import { AlertCircle, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 export const InvestorsTab = React.memo(function InvestorsTab({
   onCompanyClick,
@@ -288,7 +288,25 @@ export const InvestorsTab = React.memo(function InvestorsTab({
                     <Building2 size={24} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{investor.firmName}</h3>
+                    <h3 className="flex items-center gap-1.5 text-lg font-semibold text-slate-900 dark:text-white">
+                      {investor.firmName}
+                      {investor.coInvestorsResearchedAt && (
+                        // The tooltip sits on a span: lucide icons render an
+                        // <svg> and do not forward a title attribute.
+                        <span
+                          title={
+                            `Co-investors researched ${new Date(investor.coInvestorsResearchedAt).toLocaleDateString()}` +
+                            (typeof investor.coInvestorsFound === 'number'
+                              ? ` — ${investor.coInvestorsFound} found`
+                              : '')
+                          }
+                          aria-label="Co-investor research done"
+                          className="flex shrink-0 items-center"
+                        >
+                          <CheckCircle2 size={15} className="text-emerald-600 dark:text-emerald-500" />
+                        </span>
+                      )}
+                    </h3>
                     <div className="flex flex-col gap-1 mt-1">
                       {investor.location && (
                         <div className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
