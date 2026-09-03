@@ -8,7 +8,7 @@ import { parseOffice } from "officeparser";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
-import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
+import { fetchFirmPages, fetchHomepage, isRoleInbox, stripCitations, extractWebsite } from "./siteScrape.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck } from "./cronJobs.ts";
 
 /**
@@ -537,7 +537,14 @@ Rules:
 - Only list a firm where you can name at least one company both invested in. A
   firm that merely looks similar is not a co-investor and is not useful here.
 - Do NOT invent shared deals. If you cannot name the company, leave the firm out.
-- Prefer firms with more shared deals, and list at most 12.
+- Find as many as you can evidence, up to 20. Work through the portfolio
+  companies above one at a time and report every other investor in each of
+  their rounds, rather than stopping at the first few firms you recognise.
+- Fill in description, stages, checkSize and sectors for every firm you list.
+  A name on its own cannot be judged without opening another tab, which is the
+  thing this is meant to save.
+- Write plain prose. Do not include citation markers, reference numbers or
+  bracketed indices in any field.
 - If you cannot evidence any co-investors, return an empty array. That is a
   valid answer.
 `;
@@ -599,22 +606,37 @@ Rules:
       const raw = Array.isArray(data.coInvestors) ? data.coInvestors : [];
       const seen = new Set<string>();
 
+      // Everything the model wrote passes through stripCitations. Grounded
+      // answers carry source indices, and one of them arrived with four
+      // hundred of them appended to a domain name, which rendered as a card
+      // full of numbers.
+      const text_ = (v: any, cap = 400): string | undefined => {
+        if (typeof v !== "string") return undefined;
+        const cleanedText = stripCitations(v).slice(0, cap).trim();
+        return cleanedText === "" ? undefined : cleanedText;
+      };
+
       const cleaned = raw
         .filter((c: any) => c && typeof c.firmName === "string" && c.firmName.trim() !== "")
         .map((c: any) => ({
-          firmName: String(c.firmName).trim(),
-          description: c.description ? String(c.description).trim() : undefined,
-          stages: c.stages ? String(c.stages).trim() : undefined,
-          checkSize: c.checkSize ? String(c.checkSize).trim() : undefined,
-          sectors: c.sectors ? String(c.sectors).trim() : undefined,
-          website: c.website ? String(c.website).trim() : undefined,
+          firmName: text_(c.firmName, 120) || "",
+          description: text_(c.description, 400),
+          stages: text_(c.stages, 120),
+          checkSize: text_(c.checkSize, 80),
+          sectors: text_(c.sectors, 160),
+          // Extracted, not trimmed: see extractWebsite.
+          website: c.website ? extractWebsite(String(c.website)) : undefined,
           // Accepts either shape. The schema asks for a string now, but a
           // model that returns the old array must not be thrown away.
-          sharedDeals: Array.isArray(c.sharedDeals)
-            ? c.sharedDeals.filter((d: any) => typeof d === "string" && d.trim() !== "").map((d: string) => d.trim())
+          sharedDeals: (Array.isArray(c.sharedDeals)
+            ? c.sharedDeals.filter((d: any) => typeof d === "string")
             : typeof c.sharedDeals === "string"
-              ? c.sharedDeals.split(/[,;]+/).map((d: string) => d.trim()).filter(Boolean)
-              : [],
+              ? c.sharedDeals.split(/[,;]+/)
+              : []
+          )
+            .map((d: string) => stripCitations(d).trim())
+            .filter((d: string) => d !== "" && /[a-z]/i.test(d))
+            .slice(0, 12),
         }))
         // The whole premise is a shared cap table. No named deal, no entry —
         // otherwise this degrades into a list of firms that sound alike.
@@ -626,8 +648,24 @@ Rules:
           return true;
         })
         .map((c: any) => ({ ...c, alreadyInRepository: knownSet.has(normalise(c.firmName)) }))
+        .filter((c: any) => c.firmName !== "")
         .sort((a: any, b: any) => b.sharedDeals.length - a.sharedDeals.length)
-        .slice(0, 12);
+        .slice(0, 20);
+
+      // Addresses come off each firm's own homepage, never from the model —
+      // the same rule as everywhere else, for the same reason. One request per
+      // firm, run together, so this costs a second or two rather than a minute.
+      await Promise.all(
+        cleaned.map(async (c: any) => {
+          if (!c.website) return;
+          try {
+            const home = await fetchHomepage(c.website);
+            if (home) c.emails = home.emails.slice(0, 3);
+          } catch {
+            /* a firm whose site will not load simply has no addresses */
+          }
+        }),
+      );
 
       // Diagnosis, not decoration. "The model named eight firms and none of
       // them cited a shared deal" and "the model returned nothing" look

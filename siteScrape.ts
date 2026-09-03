@@ -281,6 +281,66 @@ export const WATCH_HINTS: { word: string; weight: number }[] = [
   { word: 'blog', weight: 1 },
 ];
 
+/**
+ * Just the homepage. For when the question is "is this a real site and what
+ * addresses are on it", not "read everything here" — one request instead of
+ * five, which matters when this runs across a dozen firms in one response.
+ */
+export async function fetchHomepage(website: string): Promise<FetchedPage | null> {
+  let root = website.trim();
+  if (!/^https?:\/\//i.test(root)) root = 'https://' + root;
+  if (!isSafePublicUrl(root)) return null;
+
+  const html = await fetchText(root);
+  if (!html) return null;
+
+  return {
+    url: root,
+    text: htmlToText(html).slice(0, MAX_TEXT_PER_PAGE),
+    emails: extractEmails(html),
+  };
+}
+
+/**
+ * Removes the citation markers grounded search leaves in generated text.
+ *
+ * A grounded answer comes back with source indices attached — "[4.1.5, 4.1.1,
+ * 3.1.5]" and, when the model loses its place, several hundred of them in a
+ * row. Rendered as-is they filled a whole card with numbers. They carry no
+ * meaning outside Google's own citation UI, so they are stripped everywhere
+ * model output reaches a field.
+ */
+export function stripCitations(raw: string): string {
+  return (raw || '')
+    .replace(/\[\s*\d+(?:\.\d+)*(?:\s*,\s*\d+(?:\.\d+)*)*\s*\]/g, ' ')
+    .replace(/\s*\[\s*\]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * The first real web address in a string, or undefined.
+ *
+ * Extraction rather than cleaning, deliberately: the model returned a domain
+ * followed by four hundred citation markers, and any approach based on
+ * removing the bad parts leaves whatever form of junk was not anticipated.
+ * Pulling out the one thing that looks like a domain cannot.
+ */
+export function extractWebsite(raw: string): string | undefined {
+  const text = stripCitations(raw || '');
+  const match = text.match(
+    /\b(?:https?:\/\/)?(?:www\.)?([a-z0-9][a-z0-9-]{0,62}(?:\.[a-z0-9][a-z0-9-]{0,62})+)(\/[^\s,;\]]*)?/i
+  );
+  if (!match) return undefined;
+
+  const host = match[1].toLowerCase();
+  // A bare "3.1.5" satisfies the shape of a domain; a real one ends in letters.
+  if (!/\.[a-z]{2,}$/i.test(host)) return undefined;
+  if (host.split('.').length < 2) return undefined;
+
+  return 'https://' + host + (match[2] || '');
+}
+
 /** Fetches a site's homepage plus the pages its links suggest, by hint set. */
 export async function fetchPagesFor(
   website: string,

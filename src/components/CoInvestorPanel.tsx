@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Loader2, Plus, Check, Globe, Sparkles } from 'lucide-react';
+import { Users, Loader2, Plus, Check, Globe, Sparkles, Mail } from 'lucide-react';
 import { InvestorRepositoryEntry, CoInvestorSuggestion } from '../types';
 import { useFirmCoInvestors } from '../hooks/useFirmCoInvestors';
 
@@ -122,7 +122,9 @@ export function CoInvestorPanel({
                 </div>
 
                 {c.description && (
-                  <p className="mb-2.5 text-[12px] leading-relaxed text-slate-600 dark:text-slate-300">{c.description}</p>
+                  <p className="mb-2.5 line-clamp-4 text-[12px] leading-relaxed text-slate-600 dark:text-slate-300">
+                    {c.description}
+                  </p>
                 )}
 
                 <dl className="mb-2.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11.5px]">
@@ -144,16 +146,38 @@ export function CoInvestorPanel({
                   <p className="mt-0.5 text-[12px] text-slate-700 dark:text-slate-200">
                     {c.sharedDeals.join(', ')}
                   </p>
-                  {c.website && (
-                    <a
-                      href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-                    >
-                      <Globe size={12} /> {c.website.replace(/^https?:\/\//, '')}
-                    </a>
-                  )}
+
+                  <div className="mt-2 flex flex-col gap-1">
+                    {c.website && (
+                      <a
+                        href={c.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                      >
+                        {/*
+                          Truncated rather than wrapped. A field fed by a model
+                          has no length it is guaranteed to respect, and this
+                          one once arrived with four hundred citation markers
+                          on the end and filled the whole card.
+                        */}
+                        <Globe size={12} className="shrink-0" />
+                        <span className="truncate">{c.website.replace(/^https?:\/\//, '')}</span>
+                      </a>
+                    )}
+
+                    {(c.emails || []).map(email => (
+                      <a
+                        key={email}
+                        href={`mailto:${email}`}
+                        title="Read from the firm's own homepage"
+                        className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-600 hover:text-indigo-600 dark:text-slate-300"
+                      >
+                        <Mail size={12} className="shrink-0 text-slate-400" />
+                        <span className="truncate">{email}</span>
+                      </a>
+                    ))}
+                  </div>
                 </div>
               </div>
             );
