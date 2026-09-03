@@ -561,10 +561,16 @@ Rules:
                     checkSize: { type: Type.STRING },
                     sectors: { type: Type.STRING },
                     website: { type: Type.STRING },
+                    // A comma-separated string, not an array of strings.
+                    // Nesting an array inside an object inside an array is the
+                    // part of structured output models handle least reliably,
+                    // and when it came back unpopulated every firm was dropped
+                    // by the evidence filter below — so the endpoint reported
+                    // "no co-investors" rather than "the schema did not fill".
                     sharedDeals: {
-                      type: Type.ARRAY,
-                      description: "Companies both firms invested in. Must be real and nameable.",
-                      items: { type: Type.STRING },
+                      type: Type.STRING,
+                      description:
+                        "Companies both firms invested in, comma-separated. Must be real and nameable.",
                     },
                   },
                 },
@@ -602,9 +608,13 @@ Rules:
           checkSize: c.checkSize ? String(c.checkSize).trim() : undefined,
           sectors: c.sectors ? String(c.sectors).trim() : undefined,
           website: c.website ? String(c.website).trim() : undefined,
+          // Accepts either shape. The schema asks for a string now, but a
+          // model that returns the old array must not be thrown away.
           sharedDeals: Array.isArray(c.sharedDeals)
             ? c.sharedDeals.filter((d: any) => typeof d === "string" && d.trim() !== "").map((d: string) => d.trim())
-            : [],
+            : typeof c.sharedDeals === "string"
+              ? c.sharedDeals.split(/[,;]+/).map((d: string) => d.trim()).filter(Boolean)
+              : [],
         }))
         // The whole premise is a shared cap table. No named deal, no entry —
         // otherwise this degrades into a list of firms that sound alike.
@@ -619,7 +629,21 @@ Rules:
         .sort((a: any, b: any) => b.sharedDeals.length - a.sharedDeals.length)
         .slice(0, 12);
 
-      res.json({ coInvestors: cleaned });
+      // Diagnosis, not decoration. "The model named eight firms and none of
+      // them cited a shared deal" and "the model returned nothing" look
+      // identical from the client, and they need completely different fixes.
+      const dropped = raw.length - cleaned.length;
+      if (cleaned.length === 0) {
+        console.warn(
+          `[coinvestors] ${firmName}: model returned ${raw.length} firms, ` +
+            `${dropped} dropped for want of a named shared deal. Raw: ${text.slice(0, 600)}`,
+        );
+      }
+
+      res.json({
+        coInvestors: cleaned,
+        diagnostics: { returned: raw.length, dropped },
+      });
     } catch (error) {
       console.error("Error discovering firm co-investors:", error);
       res.status(500).json({ error: "Failed to research co-investors" });

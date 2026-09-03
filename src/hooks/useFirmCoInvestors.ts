@@ -15,6 +15,8 @@ export function useFirmCoInvestors() {
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasRun, setHasRun] = useState(false);
+  /** How many firms the research named, and how many lacked a shared deal. */
+  const [diagnostics, setDiagnostics] = useState<{ returned: number; dropped: number } | null>(null);
 
   const discover = async (opts: {
     firmName: string;
@@ -37,6 +39,7 @@ export function useFirmCoInvestors() {
       }
       const data = await response.json();
       setResults(Array.isArray(data.coInvestors) ? data.coInvestors : []);
+      setDiagnostics(data.diagnostics || null);
       setHasRun(true);
     } catch (err: any) {
       const message = err.message || 'Unknown error';
@@ -52,5 +55,5 @@ export function useFirmCoInvestors() {
     }
   };
 
-  return { results, discover, isSearching, error, hasRun };
+  return { results, discover, isSearching, error, hasRun, diagnostics };
 }

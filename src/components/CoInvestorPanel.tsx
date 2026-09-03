@@ -21,7 +21,7 @@ export function CoInvestorPanel({
   /** Adds a recommended firm to the repository as a new entry. */
   onAdd?: (suggestion: CoInvestorSuggestion) => void;
 }) {
-  const { results, discover, isSearching, error, hasRun } = useFirmCoInvestors();
+  const { results, discover, isSearching, error, hasRun, diagnostics } = useFirmCoInvestors();
   const [added, setAdded] = React.useState<Set<string>>(new Set());
 
   const run = () =>
@@ -70,11 +70,14 @@ export function CoInvestorPanel({
       {!isSearching && hasRun && results.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-12 text-center dark:border-slate-800">
           <p className="text-[13px] text-slate-500 dark:text-slate-400">
-            No co-investors found with a nameable shared deal.
+            {diagnostics && diagnostics.returned > 0
+              ? `Found ${diagnostics.returned} possible ${diagnostics.returned === 1 ? 'firm' : 'firms'}, but none named a deal they shared with ${firm.firmName || 'this firm'}.`
+              : 'No co-investors found.'}
           </p>
           <p className="mt-1 text-[11.5px] text-slate-400">
-            Firms without a specific round in common are left out on purpose. Recording more of this
-            firm's portfolio gives the search more to work from.
+            {diagnostics && diagnostics.returned > 0
+              ? 'Firms without a specific round in common are left out on purpose — a firm that merely looks similar is not a warm introduction. Recording more of this firm\u2019s portfolio gives the search real rounds to work from.'
+              : 'Recording more of this firm\u2019s portfolio companies gives the search something to work from.'}
           </p>
         </div>
       )}
