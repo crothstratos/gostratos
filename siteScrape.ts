@@ -48,25 +48,58 @@ export interface FetchedPage {
 }
 
 /**
- * Inboxes that belong to a firm, not a person. Attaching info@ to a partner
- * would look like a personal address and get used as one.
+ * Inboxes that belong to an organisation rather than a person, ranked by how
+ * likely they are to reach someone who can act.
+ *
+ * These are not thrown away — a general address is still a way in, and for a
+ * company nobody at the firm knows it may be the only one. They are kept
+ * separable so a caller can decide: attributing info@ to a named partner would
+ * make it look like a personal address and get used as one, but offering it as
+ * the company's address is exactly right.
+ *
+ * Rank 1 reaches a human who reads mail. Rank 3 reaches a mailbox that mostly
+ * does not, and rank 4 is not a mailbox at all.
  */
-const ROLE_INBOXES = [
-  'info', 'contact', 'hello', 'hi', 'admin', 'support', 'help', 'team',
-  'office', 'press', 'media', 'careers', 'jobs', 'recruiting', 'legal',
-  'privacy', 'security', 'sales', 'marketing', 'general', 'enquiries',
-  'inquiries', 'submissions', 'pitch', 'pitches', 'deals', 'ir', 'noreply',
-  'no-reply', 'donotreply', 'webmaster', 'postmaster', 'abuse',
-];
+const ROLE_INBOXES: Record<string, number> = {
+  info: 1, contact: 1, hello: 1, hi: 1, team: 1, office: 1,
+  general: 1, enquiries: 1, inquiries: 1, admin: 1,
+
+  sales: 2, support: 2, help: 2, press: 2, media: 2, ir: 2,
+  pitch: 2, pitches: 2, deals: 2, submissions: 2, partnerships: 2,
+
+  careers: 3, jobs: 3, recruiting: 3, marketing: 3, billing: 3,
+  legal: 3, privacy: 3, security: 3, compliance: 3,
+
+  noreply: 4, 'no-reply': 4, donotreply: 4, 'do-not-reply': 4,
+  webmaster: 4, postmaster: 4, abuse: 4, mailer_daemon: 4,
+};
+
+/** True when this address belongs to a function rather than a person. */
+export function isRoleInbox(address: string): boolean {
+  return ROLE_INBOXES[address.split('@')[0].toLowerCase()] !== undefined;
+}
 
 /**
- * Pulls email addresses out of a page, from mailto: links and from body text.
+ * Orders addresses by how useful they are to write to: a named person first,
+ * then a general inbox someone reads, then functional queues, then the
+ * automated ones that will never be read by anybody.
+ */
+export function rankEmail(address: string): number {
+  return ROLE_INBOXES[address.split('@')[0].toLowerCase()] ?? 0;
+}
+
+/**
+ * Pulls every email address off a page, from mailto: links and from body text,
+ * best first.
  *
  * This is the only way an address is allowed to reach the CRM. A model asked
- * for someone's email will compose one that fits the firm's pattern and looks
- * completely right, and a wrong address that looks right is the error nobody
- * catches until mail has already gone out. An address that is literally
- * printed on the firm's own team page is a fact we read, not a guess.
+ * for someone's email will compose one that fits the domain's pattern and
+ * looks completely right, and a wrong address that looks right is the error
+ * nobody catches until mail has already gone out. An address literally printed
+ * on the company's own site is a fact we read, not a guess.
+ *
+ * Role inboxes are included and sorted last rather than dropped — callers that
+ * need a personal address filter with isRoleInbox.
  */
 export function extractEmails(html: string): string[] {
   const found = new Set<string>();
@@ -83,13 +116,16 @@ export function extractEmails(html: string): string[] {
     found.add(m[0].trim().toLowerCase());
   }
 
-  return [...found].filter(address => {
-    const local = address.split('@')[0];
-    if (ROLE_INBOXES.includes(local)) return false;
-    // Tracking pixels and asset filenames sometimes match the pattern.
-    if (/\.(png|jpe?g|gif|svg|webp|css|js)$/i.test(address)) return false;
-    return address.length <= 254;
-  });
+  return [...found]
+    .filter(address => {
+      // Tracking pixels and asset filenames sometimes match the pattern.
+      if (/\.(png|jpe?g|gif|svg|webp|css|js)$/i.test(address)) return false;
+      if (address.length > 254) return false;
+      // Sentry and similar SDKs embed keys that parse as addresses.
+      if (/^[0-9a-f]{16,}@/i.test(address)) return false;
+      return true;
+    })
+    .sort((a, b) => rankEmail(a) - rankEmail(b) || a.localeCompare(b));
 }
 
 /**

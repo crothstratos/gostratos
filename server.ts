@@ -8,7 +8,7 @@ import { parseOffice } from "officeparser";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
-import { fetchFirmPages, extractEmails, htmlToText, isSafePublicUrl } from "./siteScrape.ts";
+import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
 
 // Initialize Firebase Admin if credentials are provided
 try {
@@ -248,10 +248,17 @@ Return the information strictly as a JSON object matching this schema:
 
       // Every address printed anywhere on the pages we read. The model may
       // only pick from this list; it may not compose one.
-      const siteEmails = [...new Set(pages.flatMap((p) => p.emails))];
+      //
+      // Role inboxes are excluded here specifically. This list exists so the
+      // model can attach an address to a named partner, and info@ attached to
+      // a person reads as their personal address and gets used as one.
+      const siteEmails = [...new Set(pages.flatMap((p) => p.emails))].filter(
+        (address) => !isRoleInbox(address),
+      );
       const emailByAddress = new Map<string, string>();
       for (const page of pages) {
         for (const address of page.emails) {
+          if (isRoleInbox(address)) continue;
           if (!emailByAddress.has(address)) emailByAddress.set(address, page.url);
         }
       }
@@ -740,9 +747,17 @@ Rules:
       const founderName = clean(data.founderName);
 
       // --- read the company's own site for addresses
+      //
+      // Two different claims come out of this, and they are kept apart on
+      // purpose. "The founder's address" requires the address to name them.
+      // "An address for this company" requires only that it was printed on
+      // their site, so info@ and privacy@ qualify — for a company nobody here
+      // knows, a general inbox is often the only way in.
       let contactEmails: string[] = [];
       let founderEmail: string | undefined;
       let emailSourceUrl: string | undefined;
+      let alternateEmail: string | undefined;
+      let alternateEmailSourceUrl: string | undefined;
 
       if (website) {
         const pages = await fetchFirmPages(website);
@@ -752,17 +767,18 @@ Rules:
             if (!seen.has(address)) seen.set(address, page.url);
           }
         }
+        // Already ordered best-first by extractEmails.
         contactEmails = [...seen.keys()];
 
-        // Attribution is by name match only. "info@" and friends are already
-        // filtered out upstream; what is left still belongs to somebody
-        // unknown unless the address says whose it is.
+        // Attribution is by name match only, and never to a role inbox: a
+        // founder called Ira must not be handed ir@ because the letters line up.
         if (founderName) {
           const parts = founderName
             .toLowerCase()
             .split(/[\s,]+/)
             .filter((w) => w.length >= 3);
           for (const address of contactEmails) {
+            if (isRoleInbox(address)) continue;
             const local = address.split("@")[0].toLowerCase();
             if (parts.some((part) => local.includes(part))) {
               founderEmail = address;
@@ -771,9 +787,10 @@ Rules:
             }
           }
         }
-        if (!founderEmail && contactEmails.length) {
-          emailSourceUrl = seen.get(contactEmails[0]);
-        }
+
+        // The best remaining address, whatever it is.
+        alternateEmail = contactEmails.find((a) => a !== founderEmail);
+        if (alternateEmail) alternateEmailSourceUrl = seen.get(alternateEmail);
       }
 
       res.json({
@@ -781,7 +798,9 @@ Rules:
         description: clean(data.description),
         founderName,
         founderEmail,
-        contactEmails: contactEmails.slice(0, 6),
+        alternateEmail,
+        alternateEmailSourceUrl,
+        contactEmails: contactEmails.slice(0, 8),
         emailSourceUrl,
         location: clean(data.location),
         vertical: clean(data.vertical),

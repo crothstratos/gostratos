@@ -281,7 +281,15 @@ export interface SourcingCandidate {
    * part matches the founder's name. Never composed from a pattern.
    */
   founderEmail?: string;
-  /** Other addresses found on the site, none of them attributed to a person. */
+  /**
+   * The best address on the site that is not the founder's — a colleague, or
+   * failing that info@, support@, privacy@, whatever is there. Not attributed
+   * to anyone: it is an address for the company, which is a weaker claim than
+   * an address for a person and is shown as one.
+   */
+  alternateEmail?: string;
+  alternateEmailSourceUrl?: string;
+  /** Every address found on the site, best first. */
   contactEmails?: string[];
   emailSourceUrl?: string;
   location?: string;

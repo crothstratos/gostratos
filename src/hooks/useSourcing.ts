@@ -160,6 +160,8 @@ export function useSourcing(
         description: data.description ?? null,
         founderName: data.founderName ?? null,
         founderEmail: data.founderEmail ?? null,
+        alternateEmail: data.alternateEmail ?? null,
+        alternateEmailSourceUrl: data.alternateEmailSourceUrl ?? null,
         contactEmails: data.contactEmails ?? [],
         emailSourceUrl: data.emailSourceUrl ?? null,
         location: data.location ?? null,

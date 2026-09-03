@@ -86,6 +86,9 @@ export function SourcingTab({
           c.description,
           c.lastRound ? `Last reported round: ${c.lastRound}.` : '',
           `Sourced from the portfolio of ${(c.sourceFirms || []).map(f => f.firmName).join(', ')}.`,
+          // Carried as a note rather than into founderEmail, which would
+          // assert that info@ belongs to the founder.
+          c.alternateEmail ? `Alternate email found on their site: ${c.alternateEmail}.` : '',
         ].filter(Boolean).join(' '),
         founderName: c.founderName || '',
         founderEmail: c.founderEmail || '',
@@ -270,7 +273,13 @@ export function SourcingTab({
                       </a>
                     )}
 
-                    {c.founderEmail ? (
+                    {/*
+                      Two separate claims, shown separately. The founder badge
+                      says an address names them; the alternate says only that
+                      it was printed on their site. Collapsing the two would
+                      turn info@ into someone's personal address on sight.
+                    */}
+                    {c.founderEmail && (
                       <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                         <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                         <a href={`mailto:${c.founderEmail}`} className="truncate hover:text-indigo-600">
@@ -283,20 +292,34 @@ export function SourcingTab({
                           Founder
                         </span>
                       </div>
-                    ) : c.contactEmails && c.contactEmails.length > 0 ? (
+                    )}
+
+                    {c.alternateEmail && (
                       <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                         <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <a href={`mailto:${c.contactEmails[0]}`} className="truncate hover:text-indigo-600">
-                          {c.contactEmails[0]}
+                        <a href={`mailto:${c.alternateEmail}`} className="truncate hover:text-indigo-600">
+                          {c.alternateEmail}
                         </a>
                         <span
-                          title="Found on the company's site, but not attributable to a named person"
+                          title={
+                            c.alternateEmailSourceUrl
+                              ? `Printed on ${c.alternateEmailSourceUrl}. An address for the company, not attributed to a person.`
+                              : 'An address for the company, not attributed to a person.'
+                          }
                           className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400"
                         >
-                          Unattributed
+                          Alternate
                         </span>
+                        {(c.contactEmails?.length || 0) > (c.founderEmail ? 2 : 1) && (
+                          <span
+                            title={c.contactEmails!.join('\n')}
+                            className="shrink-0 cursor-help text-[10.5px] text-slate-400"
+                          >
+                            +{c.contactEmails!.length - (c.founderEmail ? 2 : 1)} more
+                          </span>
+                        )}
                       </div>
-                    ) : null}
+                    )}
 
                     {(c.founderName || c.location || c.vertical || c.yearFounded) && (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-500 dark:text-slate-400">
