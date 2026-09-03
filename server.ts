@@ -8,7 +8,7 @@ import { parseOffice } from "officeparser";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
-import { fetchFirmPages } from "./siteScrape.ts";
+import { fetchFirmPages, extractEmails, htmlToText, isSafePublicUrl } from "./siteScrape.ts";
 
 // Initialize Firebase Admin if credentials are provided
 try {
@@ -653,6 +653,144 @@ Return the information strictly as a JSON object matching this schema:
     } catch (error) {
       console.error("Error discovering coinvestors:", error);
       res.status(500).json({ error: "Failed to discover coinvestors" });
+    }
+  });
+
+  /**
+   * Researches one company found in an investor's portfolio that we do not
+   * track yet. Feeds the Sourcing tab.
+   *
+   * One grounded call establishes the company and its site; the site is then
+   * fetched and read directly for the description and for addresses. Splitting
+   * it that way is what keeps the email honest — the model is never asked for
+   * one, and the only addresses returned are the ones literally printed on a
+   * page. An address is attributed to the founder only when its local part
+   * actually contains their name; everything else comes back as a general
+   * contact address with no person attached to it.
+   */
+  app.post("/api/enrich-company", async (req, res) => {
+    try {
+      const { name, viaFirm } = req.body;
+      if (!name || String(name).trim() === "") {
+        return res.status(400).json({ error: "A company name is required." });
+      }
+      const ai = getGeminiAI();
+
+      const prompt = `
+You are a VC analyst. Using web search, research the startup "${name}"${
+        viaFirm ? `, which is a portfolio company of ${viaFirm}` : ""
+      }.
+
+Report what you can establish:
+- Their official website (the company's own domain, not a directory listing,
+  not a news article, not the investor's portfolio page).
+- A two-sentence description of what the company does.
+- The founder or founders, by name.
+- Headquarters location, as "City, Country" or "City, State".
+- The sector they operate in.
+- The year they were founded.
+- Their most recent funding round, if reported.
+
+Rules:
+- Do NOT return any email address. There is no email field.
+- Do NOT guess a website. An incorrect domain sends someone to a stranger's
+  site, so leave it empty unless you are confident it is theirs.
+- If more than one company shares this name, pick the one backed by${
+        viaFirm ? ` ${viaFirm}` : " a venture investor"
+      } and say which in the description.
+- If you cannot establish the company at all, return empty fields. That is a
+  valid answer.
+`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              website: { type: Type.STRING },
+              description: { type: Type.STRING },
+              founderName: { type: Type.STRING },
+              location: { type: Type.STRING },
+              vertical: { type: Type.STRING },
+              yearFounded: { type: Type.STRING },
+              lastRound: { type: Type.STRING },
+            },
+          },
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      let text = response.text || "{}";
+      text = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
+
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        console.error("enrich-company: JSON parsing error. Raw response:", text);
+        throw err;
+      }
+
+      const clean = (v: any) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+
+      const website = clean(data.website);
+      const founderName = clean(data.founderName);
+
+      // --- read the company's own site for addresses
+      let contactEmails: string[] = [];
+      let founderEmail: string | undefined;
+      let emailSourceUrl: string | undefined;
+
+      if (website) {
+        const pages = await fetchFirmPages(website);
+        const seen = new Map<string, string>();
+        for (const page of pages) {
+          for (const address of page.emails) {
+            if (!seen.has(address)) seen.set(address, page.url);
+          }
+        }
+        contactEmails = [...seen.keys()];
+
+        // Attribution is by name match only. "info@" and friends are already
+        // filtered out upstream; what is left still belongs to somebody
+        // unknown unless the address says whose it is.
+        if (founderName) {
+          const parts = founderName
+            .toLowerCase()
+            .split(/[\s,]+/)
+            .filter((w) => w.length >= 3);
+          for (const address of contactEmails) {
+            const local = address.split("@")[0].toLowerCase();
+            if (parts.some((part) => local.includes(part))) {
+              founderEmail = address;
+              emailSourceUrl = seen.get(address);
+              break;
+            }
+          }
+        }
+        if (!founderEmail && contactEmails.length) {
+          emailSourceUrl = seen.get(contactEmails[0]);
+        }
+      }
+
+      res.json({
+        website,
+        description: clean(data.description),
+        founderName,
+        founderEmail,
+        contactEmails: contactEmails.slice(0, 6),
+        emailSourceUrl,
+        location: clean(data.location),
+        vertical: clean(data.vertical),
+        yearFounded: clean(data.yearFounded),
+        lastRound: clean(data.lastRound),
+      });
+    } catch (error) {
+      console.error("Error enriching company:", error);
+      res.status(500).json({ error: "Failed to research company" });
     }
   });
 

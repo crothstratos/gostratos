@@ -54,7 +54,7 @@ service cloud.firestore {
     // fail with "Missing or insufficient permissions" on that collection.
     //
     // Collections in use: attachments, audit, companies, company_data_pool,
-    // contacts, events, investor_repository, investors.
+    // contacts, events, investor_repository, investors, sourcing.
 
     match /companies/{id} {
       allow read, write: if hasAccess();
@@ -91,6 +91,14 @@ service cloud.firestore {
     match /contacts/{id} {
       allow read, create, update: if hasAccess();
       allow delete: if false;
+    }
+
+    // Sourcing candidates: companies our investors back that we do not track.
+    // Derived data, rebuilt by discovery from the investor repository and the
+    // companies collection, so it is fully writable — nothing here is a record
+    // of anything a person authored.
+    match /sourcing/{id} {
+      allow read, write: if hasAccess();
     }
 
     // Append-only, and this time it actually is: nothing else matches these

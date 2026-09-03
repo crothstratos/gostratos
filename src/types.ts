@@ -255,6 +255,46 @@ export interface PersonSuggestion {
   sourceUrl?: string;
 }
 
+/**
+ * A company an investor in our repository has backed that we do not track.
+ *
+ * Discovery is free and deterministic: portfolio lists minus the companies
+ * already in the CRM. Everything below `website` is researched afterwards and
+ * is therefore softer — see `researchState`.
+ */
+export interface SourcingCandidate {
+  id: string;
+  name: string;
+  /** Normalised name, so the same company from two firms is one row. */
+  nameKey: string;
+  /** Every firm in our repository whose portfolio lists this company. */
+  sourceFirms: { id: string; firmName: string }[];
+
+  status: 'active' | 'dismissed';
+  researchState: 'pending' | 'done' | 'failed';
+
+  website?: string;
+  description?: string;
+  founderName?: string;
+  /**
+   * Only ever an address printed on a page the server fetched, whose local
+   * part matches the founder's name. Never composed from a pattern.
+   */
+  founderEmail?: string;
+  /** Other addresses found on the site, none of them attributed to a person. */
+  contactEmails?: string[];
+  emailSourceUrl?: string;
+  location?: string;
+  vertical?: string;
+  yearFounded?: string;
+  lastRound?: string;
+
+  discoveredAt: string;
+  researchedAt?: string;
+  /** Why research produced nothing, when it did not. */
+  researchNote?: string;
+}
+
 /** A firm that has shared a cap table with one of ours. */
 export interface CoInvestorSuggestion {
   firmName: string;
