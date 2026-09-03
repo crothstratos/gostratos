@@ -491,12 +491,16 @@ Rules, which matter more than completeness:
   /**
    * Who does this firm invest alongside?
    *
-   * Answers it from actual rounds — "both were in Acme's Series A" — rather
-   * than from thematic similarity, because a firm that merely looks similar is
-   * not a warm introduction and a firm that has shared three cap tables is.
-   * Each recommendation comes back with enough of a profile to judge it
-   * without leaving the page, and with the deals that justify it, so a
-   * suggestion can be checked rather than taken on faith.
+   * Asked round by round, not all at once. The first version handed the model
+   * a whole portfolio and asked it to work out the co-investors across it, and
+   * it consistently came back with one or two firms: that is a research
+   * project, not a question, and a single answer cannot hold the result of
+   * one. Asking "who else was in Acme's rounds?" is a question with an answer,
+   * so this fans out over the portfolio, one focused call per company, and
+   * aggregates.
+   *
+   * A firm appearing across several of those rounds is exactly the signal
+   * worth surfacing, and it only exists once the results are counted together.
    */
   app.post("/api/discover-firm-coinvestors", async (req, res) => {
     try {
@@ -506,157 +510,219 @@ Rules, which matter more than completeness:
       }
       const ai = getGeminiAI();
 
-      const portfolio = Array.isArray(portfolioCompanies) ? portfolioCompanies.slice(0, 60) : [];
-      const known = Array.isArray(knownFirms) ? knownFirms.slice(0, 200) : [];
+      const normalise = (v: string) => String(v).toLowerCase().replace(/[^a-z0-9]/g, "");
+      const selfKey = normalise(firmName);
+      const knownSet = new Set(
+        (Array.isArray(knownFirms) ? knownFirms : []).map((k: any) => normalise(String(k))),
+      );
 
-      const prompt = `
-You are a VC research analyst. Using web search, research which other investors
-have participated in the same funding rounds as ${firmName}${website ? ` (${website})` : ""}.
+      // Bounded: each of these is a grounded call, and they run together.
+      const MAX_COMPANIES = 8;
+      let portfolio: string[] = (Array.isArray(portfolioCompanies) ? portfolioCompanies : [])
+        .filter((c: any) => typeof c === "string" && c.trim() !== "")
+        .map((c: string) => c.trim());
 
-${
-  portfolio.length
-    ? `These are companies we believe ${firmName} has backed. Look at the rounds
-in these companies in particular:
-${portfolio.join(", ")}`
-    : `Start by finding the companies ${firmName} has backed, then look at who
-else was in those rounds.`
-}
+      // With no portfolio on file there is nothing to fan out over, so one
+      // call establishes some first.
+      if (portfolio.length === 0) {
+        const seed = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: `Using web search, list up to ${MAX_COMPANIES} companies that the venture firm "${firmName}"${
+            website ? ` (${website})` : ""
+          } has invested in. Return only company names you can evidence.`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: { companies: { type: Type.ARRAY, items: { type: Type.STRING } } },
+            },
+            tools: [{ googleSearch: {} }],
+          },
+        });
+        try {
+          const parsed = JSON.parse(
+            (seed.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
+          );
+          portfolio = (parsed.companies || [])
+            .filter((c: any) => typeof c === "string")
+            .map((c: string) => stripCitations(c).trim())
+            .filter(Boolean);
+        } catch {
+          portfolio = [];
+        }
+      }
 
-For each co-investor you can evidence, report:
-- Their firm name.
-- A one-or-two sentence description of what they do.
-- The stages they invest at (e.g. "Pre-seed, Seed").
-- Their typical check size, if reported anywhere.
-- The sectors they focus on.
-- Their website.
-- Which specific companies they and ${firmName} were both investors in. This is
-  the evidence for the recommendation, so it must be real.
-- How many of those shared deals you found.
+      const examined = portfolio.slice(0, MAX_COMPANIES);
+      if (examined.length === 0) {
+        return res.json({
+          coInvestors: [],
+          diagnostics: { returned: 0, dropped: 0, companiesExamined: [] },
+        });
+      }
 
-Rules:
-- Only list a firm where you can name at least one company both invested in. A
-  firm that merely looks similar is not a co-investor and is not useful here.
-- Do NOT invent shared deals. If you cannot name the company, leave the firm out.
-- Find as many as you can evidence, up to 20. Work through the portfolio
-  companies above one at a time and report every other investor in each of
-  their rounds, rather than stopping at the first few firms you recognise.
-- Fill in description, stages, checkSize and sectors for every firm you list.
-  A name on its own cannot be judged without opening another tab, which is the
-  thing this is meant to save.
-- Write plain prose. Do not include citation markers, reference numbers or
-  bracketed indices in any field.
-- If you cannot evidence any co-investors, return an empty array. That is a
-  valid answer.
-`;
+      // --- one focused question per company, run together
+      const perCompany = await Promise.all(
+        examined.map(async (company) => {
+          try {
+            const response = await ai.models.generateContent({
+              model: GEMINI_MODEL,
+              contents: `
+Using web search, list the investors that have participated in funding rounds
+for the company "${company}". We already know ${firmName} is an investor.
 
-      const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              coInvestors: {
-                type: Type.ARRAY,
-                items: {
+For each other investor, give the firm's name and which round they took part in
+(for example "Series A, 2023"). Include every investor you can evidence, not
+just the well-known ones.
+
+Do not invent investors. If you cannot establish who backed this company,
+return an empty array. Do not include citation markers in any field.
+`,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
                   type: Type.OBJECT,
                   properties: {
-                    firmName: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    stages: { type: Type.STRING },
-                    checkSize: { type: Type.STRING },
-                    sectors: { type: Type.STRING },
-                    website: { type: Type.STRING },
-                    // A comma-separated string, not an array of strings.
-                    // Nesting an array inside an object inside an array is the
-                    // part of structured output models handle least reliably,
-                    // and when it came back unpopulated every firm was dropped
-                    // by the evidence filter below — so the endpoint reported
-                    // "no co-investors" rather than "the schema did not fill".
-                    sharedDeals: {
-                      type: Type.STRING,
-                      description:
-                        "Companies both firms invested in, comma-separated. Must be real and nameable.",
+                    investors: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          firmName: { type: Type.STRING },
+                          round: { type: Type.STRING },
+                        },
+                      },
+                    },
+                  },
+                },
+                tools: [{ googleSearch: {} }],
+              },
+            });
+
+            const parsed = JSON.parse(
+              (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
+            );
+            const investors = (parsed.investors || [])
+              .map((i: any) => ({
+                firmName: stripCitations(String(i?.firmName || "")).trim(),
+                round: stripCitations(String(i?.round || "")).trim(),
+              }))
+              .filter((i: any) => i.firmName !== "" && normalise(i.firmName) !== selfKey);
+            return { company, investors };
+          } catch (err: any) {
+            console.warn(`[coinvestors] ${company}: ${err.message}`);
+            return { company, investors: [] as { firmName: string; round: string }[] };
+          }
+        }),
+      );
+
+      // --- aggregate: a firm's weight is how many of these rounds it shared
+      const byFirm = new Map<
+        string,
+        { firmName: string; sharedDeals: string[]; rounds: string[] }
+      >();
+
+      for (const { company, investors } of perCompany) {
+        for (const investor of investors) {
+          const key = normalise(investor.firmName);
+          const entry = byFirm.get(key);
+          if (entry) {
+            if (!entry.sharedDeals.includes(company)) {
+              entry.sharedDeals.push(company);
+              if (investor.round) entry.rounds.push(`${company} (${investor.round})`);
+            }
+          } else {
+            byFirm.set(key, {
+              firmName: investor.firmName,
+              sharedDeals: [company],
+              rounds: investor.round ? [`${company} (${investor.round})`] : [],
+            });
+          }
+        }
+      }
+
+      const ranked = [...byFirm.values()]
+        .sort((a, b) => b.sharedDeals.length - a.sharedDeals.length)
+        .slice(0, 20);
+
+      // --- one call to profile the firms actually worth showing
+      let profiles: Record<string, any> = {};
+      if (ranked.length > 0) {
+        try {
+          const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: `
+Using web search, profile each of these venture investors:
+
+${ranked.map((r) => `- ${r.firmName}`).join("\n")}
+
+For each, give: a one or two sentence description of what they do, the stages
+they invest at, their typical check size if it is reported anywhere, the
+sectors they focus on, and their website.
+
+Leave a field empty rather than guessing at it. Write plain prose with no
+citation markers, reference numbers or bracketed indices.
+`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  firms: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        firmName: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        stages: { type: Type.STRING },
+                        checkSize: { type: Type.STRING },
+                        sectors: { type: Type.STRING },
+                        website: { type: Type.STRING },
+                      },
                     },
                   },
                 },
               },
+              tools: [{ googleSearch: {} }],
             },
-          },
-          tools: [{ googleSearch: {} }],
-        },
-      });
+          });
 
-      let text = response.text || "{}";
-      text = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
-
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch (err) {
-        console.error("discover-firm-coinvestors: JSON parsing error. Raw response:", text);
-        throw err;
+          const parsed = JSON.parse(
+            (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
+          );
+          for (const firm of parsed.firms || []) {
+            if (firm?.firmName) profiles[normalise(String(firm.firmName))] = firm;
+          }
+        } catch (err: any) {
+          console.warn(`[coinvestors] profiling failed: ${err.message}`);
+        }
       }
 
-      const normalise = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const knownSet = new Set(known.map((k: any) => normalise(String(k))));
-      const selfKey = normalise(String(firmName));
-
-      const raw = Array.isArray(data.coInvestors) ? data.coInvestors : [];
-      const seen = new Set<string>();
-
-      // Everything the model wrote passes through stripCitations. Grounded
-      // answers carry source indices, and one of them arrived with four
-      // hundred of them appended to a domain name, which rendered as a card
-      // full of numbers.
       const text_ = (v: any, cap = 400): string | undefined => {
         if (typeof v !== "string") return undefined;
-        const cleanedText = stripCitations(v).slice(0, cap).trim();
-        return cleanedText === "" ? undefined : cleanedText;
+        const t = stripCitations(v).slice(0, cap).trim();
+        return t === "" ? undefined : t;
       };
 
-      const cleaned = raw
-        .filter((c: any) => c && typeof c.firmName === "string" && c.firmName.trim() !== "")
-        .map((c: any) => ({
-          firmName: text_(c.firmName, 120) || "",
-          description: text_(c.description, 400),
-          stages: text_(c.stages, 120),
-          checkSize: text_(c.checkSize, 80),
-          sectors: text_(c.sectors, 160),
-          // Extracted, not trimmed: see extractWebsite.
-          website: c.website ? extractWebsite(String(c.website)) : undefined,
-          // Accepts either shape. The schema asks for a string now, but a
-          // model that returns the old array must not be thrown away.
-          sharedDeals: (Array.isArray(c.sharedDeals)
-            ? c.sharedDeals.filter((d: any) => typeof d === "string")
-            : typeof c.sharedDeals === "string"
-              ? c.sharedDeals.split(/[,;]+/)
-              : []
-          )
-            .map((d: string) => stripCitations(d).trim())
-            .filter((d: string) => d !== "" && /[a-z]/i.test(d))
-            .slice(0, 12),
-        }))
-        // The whole premise is a shared cap table. No named deal, no entry —
-        // otherwise this degrades into a list of firms that sound alike.
-        .filter((c: any) => c.sharedDeals.length > 0)
-        .filter((c: any) => {
-          const key = normalise(c.firmName);
-          if (key === selfKey || seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        })
-        .map((c: any) => ({ ...c, alreadyInRepository: knownSet.has(normalise(c.firmName)) }))
-        .filter((c: any) => c.firmName !== "")
-        .sort((a: any, b: any) => b.sharedDeals.length - a.sharedDeals.length)
-        .slice(0, 20);
+      const cleaned = ranked.map((r) => {
+        const profile = profiles[normalise(r.firmName)] || {};
+        return {
+          firmName: r.firmName,
+          description: text_(profile.description, 400),
+          stages: text_(profile.stages, 120),
+          checkSize: text_(profile.checkSize, 80),
+          sectors: text_(profile.sectors, 160),
+          website: profile.website ? extractWebsite(String(profile.website)) : undefined,
+          sharedDeals: r.sharedDeals,
+          rounds: r.rounds.slice(0, 6),
+          alreadyInRepository: knownSet.has(normalise(r.firmName)),
+          emails: [] as string[],
+        };
+      });
 
-      // Addresses come off each firm's own homepage, never from the model —
-      // the same rule as everywhere else, for the same reason. One request per
-      // firm, run together, so this costs a second or two rather than a minute.
+      // Addresses come off each firm's own homepage, never from the model.
       await Promise.all(
-        cleaned.map(async (c: any) => {
+        cleaned.map(async (c) => {
           if (!c.website) return;
           try {
             const home = await fetchHomepage(c.website);
@@ -667,20 +733,18 @@ Rules:
         }),
       );
 
-      // Diagnosis, not decoration. "The model named eight firms and none of
-      // them cited a shared deal" and "the model returned nothing" look
-      // identical from the client, and they need completely different fixes.
-      const dropped = raw.length - cleaned.length;
-      if (cleaned.length === 0) {
-        console.warn(
-          `[coinvestors] ${firmName}: model returned ${raw.length} firms, ` +
-            `${dropped} dropped for want of a named shared deal. Raw: ${text.slice(0, 600)}`,
-        );
-      }
+      console.log(
+        `[coinvestors] ${firmName}: examined ${examined.length} companies, ` +
+          `found ${byFirm.size} distinct firms, returning ${cleaned.length}`,
+      );
 
       res.json({
         coInvestors: cleaned,
-        diagnostics: { returned: raw.length, dropped },
+        diagnostics: {
+          returned: byFirm.size,
+          dropped: byFirm.size - cleaned.length,
+          companiesExamined: examined,
+        },
       });
     } catch (error) {
       console.error("Error discovering firm co-investors:", error);

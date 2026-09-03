@@ -71,13 +71,12 @@ export function CoInvestorPanel({
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-12 text-center dark:border-slate-800">
           <p className="text-[13px] text-slate-500 dark:text-slate-400">
             {diagnostics && diagnostics.returned > 0
-              ? `Found ${diagnostics.returned} possible ${diagnostics.returned === 1 ? 'firm' : 'firms'}, but none named a deal they shared with ${firm.firmName || 'this firm'}.`
-              : 'No co-investors found.'}
+              ? `Found ${diagnostics.returned} possible ${diagnostics.returned === 1 ? 'firm' : 'firms'}, none of which could be tied to a specific round.`
+              : 'No co-investors found in the rounds examined.'}
           </p>
           <p className="mt-1 text-[11.5px] text-slate-400">
-            {diagnostics && diagnostics.returned > 0
-              ? 'Firms without a specific round in common are left out on purpose — a firm that merely looks similar is not a warm introduction. Recording more of this firm\u2019s portfolio gives the search real rounds to work from.'
-              : 'Recording more of this firm\u2019s portfolio companies gives the search something to work from.'}
+            Recording more of this firm&rsquo;s portfolio companies gives the search more rounds to
+            look through &mdash; it works through up to eight of them per run.
           </p>
         </div>
       )}

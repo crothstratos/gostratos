@@ -16,7 +16,7 @@ export function useFirmCoInvestors() {
   const [error, setError] = useState<string | null>(null);
   const [hasRun, setHasRun] = useState(false);
   /** How many firms the research named, and how many lacked a shared deal. */
-  const [diagnostics, setDiagnostics] = useState<{ returned: number; dropped: number } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<{ returned: number; dropped: number; companiesExamined?: string[] } | null>(null);
 
   const discover = async (opts: {
     firmName: string;
@@ -38,7 +38,16 @@ export function useFirmCoInvestors() {
         throw new Error(body.error || `Server error: ${response.status}`);
       }
       const data = await response.json();
-      setResults(Array.isArray(data.coInvestors) ? data.coInvestors : []);
+      // New firms first: a name we already track is a confirmation, and a name
+      // we do not is the reason to run this at all. Within each group, more
+      // shared rounds first.
+      const rows: CoInvestorSuggestion[] = Array.isArray(data.coInvestors) ? data.coInvestors : [];
+      rows.sort((a, b) => {
+        const known = Number(a.alreadyInRepository) - Number(b.alreadyInRepository);
+        if (known !== 0) return known;
+        return (b.sharedDeals?.length || 0) - (a.sharedDeals?.length || 0);
+      });
+      setResults(rows);
       setDiagnostics(data.diagnostics || null);
       setHasRun(true);
     } catch (err: any) {

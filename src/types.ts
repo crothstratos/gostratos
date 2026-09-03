@@ -363,6 +363,8 @@ export interface CoInvestorSuggestion {
   website?: string;
   /** Companies both firms backed. The evidence; never empty. */
   sharedDeals: string[];
+  /** Which round of each shared deal they were in, where it is known. */
+  rounds?: string[];
   /** Addresses read off the firm's own homepage. Never model-generated. */
   emails?: string[];
   alreadyInRepository?: boolean;
