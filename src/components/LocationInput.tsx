@@ -47,7 +47,11 @@ export function LocationInput({ value, onChange, className = '', placeholder = '
 
     const initServices = async () => {
       try {
-        setOptions({ key: apiKey, version: "weekly" });
+        // `version` is accepted by the loader at runtime but is missing from
+        // its published types, so this needs the cast rather than the removal
+        // — dropping it would silently move the app to a different Maps API
+        // version.
+        setOptions({ key: apiKey, version: "weekly" } as any);
         await importLibrary("places");
         const google = window.google;
         const { AutocompleteService, PlacesService, AutocompleteSessionToken } = google.maps.places;

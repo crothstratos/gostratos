@@ -45,6 +45,42 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
   const { investors } = useInvestors();
   const [formData, setFormData] = useState<Company | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  /**
+   * The company as it was when this modal opened, for spotting unsaved edits.
+   *
+   * Closing used to discard everything silently. On a form this long that is a
+   * lot of typing to lose to a misplaced click, and nothing about the X
+   * suggested it would.
+   */
+  const openedWith = useRef<string>('');
+  useEffect(() => {
+    openedWith.current = JSON.stringify(company || {});
+  }, [company?.id]);
+
+  const hasUnsavedEdits = () =>
+    openedWith.current !== '' && JSON.stringify(formData || {}) !== openedWith.current;
+
+  const requestClose = () => {
+    if (hasUnsavedEdits() &&
+        !window.confirm('You have unsaved changes on this company. Close anyway and lose them?')) {
+      return;
+    }
+    onClose();
+  };
+
+  // Escape closes the modal, through the same guard. Every other dialog in the
+  // app closes on Escape; this one trapped you until you found the X.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Let the inner confirm dialog and the person card take it first.
+      if (showDeleteConfirm || personId) return;
+      requestClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
   // A referrer chip was clicked. Opens their profile over this modal; no
   // onCompanyClick is passed down, so following a company from there cannot
   // swap this modal out from under unsaved edits.
@@ -893,7 +929,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
               </button>
             )}
             <button
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded-full p-2 text-slate-400 dark:text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
             >
               <X size={20} />
@@ -1300,7 +1336,17 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
                     <input
                       type="number"
                       name={field.name}
-                      value={(formData[field.name as keyof Company] as number) || ''}
+                      /*
+                        `value || ''` turned a stored 0 into an empty box, so a
+                        probability of close of 0% was unrepresentable — type it
+                        and the field blanked. Only absent values are blank now.
+                      */
+                      value={
+                        formData[field.name as keyof Company] === undefined ||
+                        formData[field.name as keyof Company] === null
+                          ? ''
+                          : (formData[field.name as keyof Company] as number)
+                      }
                       onChange={handleChange}
                       className="w-full rounded-lg border border-slate-300/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 px-4 py-2.5 text-slate-900 dark:text-slate-100 focus:border-indigo-500 dark:focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-sm"
                     />
@@ -2106,7 +2152,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
         <div className="flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800 px-4 py-3">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             Cancel

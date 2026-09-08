@@ -43,31 +43,64 @@ const RADAR_DATA = [
 
 interface ChecklistSectionProps {
   pillarName: keyof typeof PILLARS;
+  /** Which company these notes belong to. Re-seeding is keyed on it. */
+  companyId?: string;
   completedItems: Set<string>;
   toggleChecklist: (item: string) => void;
   findings: Record<string, string>;
   handleFindingChange: (sectionId: string, value: string) => void;
 }
 
-const ChecklistSection = React.memo(function ChecklistSection({ pillarName, completedItems, toggleChecklist, findings, handleFindingChange }: ChecklistSectionProps) {
+const ChecklistSection = React.memo(function ChecklistSection({ pillarName, companyId, completedItems, toggleChecklist, findings, handleFindingChange }: ChecklistSectionProps) {
   const sections = PILLARS[pillarName];
-  
-  // Local state for fast typing without triggering firestore updates on every keystroke
+
+  // Typed text is held locally so a keystroke does not hit Firestore.
   const [localFindings, setLocalFindings] = useState<Record<string, string>>(findings);
-  
+
+  /**
+   * Re-seed from the record only when the company changes.
+   *
+   * This used to watch `findings`, which is `selectedCompany?.ddFindings || {}`
+   * — a fresh object on every render. Every Firestore snapshot therefore reset
+   * the box being typed in, and a snapshot arrives whenever anyone saves
+   * anything, including the author ticking a checklist item two lines up. Notes
+   * disappeared mid-sentence and the cause looked like magic.
+   */
+  const seededFor = React.useRef<string | undefined>(companyId);
   React.useEffect(() => {
+    if (seededFor.current === companyId) return;
+    seededFor.current = companyId;
     setLocalFindings(findings);
-  }, [findings]);
+  }, [companyId, findings]);
 
   const handleChange = (sectionId: string, value: string) => {
     setLocalFindings(prev => ({ ...prev, [sectionId]: value }));
   };
 
+  const commit = React.useCallback((sectionId: string, value: string) => {
+    if (value !== (findings[sectionId] || '')) handleFindingChange(sectionId, value);
+  }, [findings, handleFindingChange]);
+
   const handleBlur = (sectionId: string) => {
-    if (localFindings[sectionId] !== findings[sectionId]) {
-      handleFindingChange(sectionId, localFindings[sectionId] || '');
-    }
+    commit(sectionId, localFindings[sectionId] || '');
   };
+
+  /**
+   * Autosave, because blur is not a promise anyone made. Closing the tab or
+   * clicking another company never blurs the textarea, and until now that lost
+   * everything written since it was focused.
+   */
+  const pending = React.useRef(localFindings);
+  pending.current = localFindings;
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      for (const [sectionId, value] of Object.entries(pending.current)) {
+        commit(sectionId, value || '');
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [localFindings, commit]);
 
   return (
     <div className="flex flex-col gap-6 h-full overflow-y-auto pr-2 pb-8">
@@ -369,10 +402,10 @@ export const DueDiligence = React.memo(function DueDiligence({ companies, onUpda
           </div>
         )}
 
-        {activeTab === 'Product' && <ChecklistSection pillarName="Product" completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
-        {activeTab === 'Market' && <ChecklistSection pillarName="Market" completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
-        {activeTab === 'Financials' && <ChecklistSection pillarName="Financials" completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
-        {activeTab === 'Legal/Team' && <ChecklistSection pillarName="Legal/Team" completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
+        {activeTab === 'Product' && <ChecklistSection pillarName="Product" companyId={selectedCompany?.id} completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
+        {activeTab === 'Market' && <ChecklistSection pillarName="Market" companyId={selectedCompany?.id} completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
+        {activeTab === 'Financials' && <ChecklistSection pillarName="Financials" companyId={selectedCompany?.id} completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
+        {activeTab === 'Legal/Team' && <ChecklistSection pillarName="Legal/Team" companyId={selectedCompany?.id} completedItems={completedItems} toggleChecklist={toggleChecklist} findings={findings} handleFindingChange={handleFindingChange} />}
 
         {activeTab === 'Files' && (
           <div className="flex flex-col h-full">

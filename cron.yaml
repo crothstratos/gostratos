@@ -9,6 +9,15 @@
 
 cron:
   - description: >-
+      Export the whole database to Cloud Storage. This is the backup that
+      survives losing the project; the staging copy does not, because it lives
+      inside it. Nightly, because a day is roughly how much work the firm can
+      stand to redo.
+    url: /api/cron/firestore-export
+    schedule: every day 03:00
+    timezone: America/Chicago
+
+  - description: >-
       Snapshot every investor's portfolio and report what changed. Monthly,
       because portfolios move on the timescale of funding announcements and a
       daily run would mostly record that nothing happened.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { InvestorRepositoryEntry } from '../types';
 import { useAuth } from '../components/AuthContext';
@@ -100,15 +100,32 @@ export function useInvestors() {
     }
   }, [user]);
 
+  /** Same as companies: the record is written to audit before it is removed. */
   const handleDeleteInvestor = useCallback(async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'investor_repository', id));
+      const ref = doc(db, 'investor_repository', id);
+      const snap = await getDoc(ref);
+      const data: any = snap.exists() ? snap.data() : null;
+
+      await setDoc(doc(collection(db, 'audit')), {
+        action: 'delete',
+        collectionName: 'investor_repository',
+        companyId: id,
+        companyName: data?.firmName || '(unknown firm)',
+        changedBy: user?.email || 'unknown',
+        changedAt: new Date().toISOString(),
+        changedFields: ['(deleted)'],
+        deletedRecord: data,
+        deletedRecordTruncated: false,
+      });
+
+      await deleteDoc(ref);
     } catch (err) {
       console.error("Error deleting investor:", err);
       handleFirestoreError(err, OperationType.DELETE, 'investor_repository');
       throw err;
     }
-  }, []);
+  }, [user]);
 
   return {
     investors,

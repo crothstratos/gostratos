@@ -983,7 +983,14 @@ service cloud.firestore {
                     </span>
                   </div>
                   <div className="p-3 flex-1 space-y-3">
-                    {stageInvestors.slice(0, 50).map(investor => (
+                    {/*
+                      The 50-row cap here was defensive copying from the Kanban
+                      board, where a column can hold thousands of companies. A
+                      fundraising stage holds tens of investors, so it was never
+                      reached in testing and would have hidden rows in silence
+                      the first time it was.
+                    */}
+                    {stageInvestors.map(investor => (
                       <div 
                         key={investor.id}
                         onClick={() => handleSelectInvestor(investor)}
@@ -2440,7 +2447,7 @@ service cloud.firestore {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                            {stageInvestors.slice(0, 50).map(investor => (
+                            {stageInvestors.map(investor => (
                               <tr key={investor.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition-colors">
                                 <td className="py-3 px-4 align-top">
                                   <div className="font-medium text-slate-900 dark:text-white">{investor.firmName}</div>

@@ -2,6 +2,16 @@
  * Copy every document from the production Firestore database into the
  * staging database, in the same project.
  *
+ * The staging copy is readable at
+ *   https://console.firebase.google.com/project/gen-lang-client-0128987745/firestore/databases/staging/data
+ *
+ * Note what this is and is not. It protects against a mistake made through the
+ * app — someone deleting records they should not have. It does NOT protect
+ * against anything at the project level, because it lives in the same project:
+ * an IAM change, a deleted database, or an account acting badly in the console
+ * takes both copies. Scheduled exports to Cloud Storage are the answer to that,
+ * and are set up separately.
+ *
  * Why this exists rather than `gcloud firestore import`: the export contains
  * at least one field larger than Firestore's 1500-byte index limit, and the
  * import path enforces that limit strictly. The same data writes fine through
@@ -26,15 +36,22 @@ const PROJECT_ID = 'gen-lang-client-0128987745';
 const SOURCE_DB = 'ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86';
 const TARGET_DB = 'staging';
 
-const COLLECTIONS = [
-  'companies',
-  'investors',
-  'investor_repository',
-  'events',
-  'attachments',
-  'company_data_pool',
-  'audit',
-];
+/**
+ * Nothing is listed here on purpose. The collections to copy are read from the
+ * database itself every run.
+ *
+ * A hardcoded list is a backup that silently stops being one. This file used
+ * to name seven collections, one of which never existed, while the app had
+ * grown to thirteen — so the 8,383-record contacts directory and every
+ * snapshot the scheduled jobs produce were outside the copy, and nobody would
+ * have found out until they were needed.
+ *
+ * Asking the database what it contains cannot drift.
+ */
+const SKIP_COLLECTIONS = new Set([
+  // Nothing yet. Add a name here only with a reason, and expect to justify it
+  // the next time somebody needs to restore.
+]);
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
@@ -105,9 +122,24 @@ async function copyCollection(source, target, name) {
   const source = getFirestore(app, SOURCE_DB);
   const target = getFirestore(app, TARGET_DB);
 
-  // Asks the databases what they contain rather than trusting the list above.
-  // The list was originally derived by reading the application code, which
-  // missed a collection the app no longer references but that still exists.
+  /**
+   * What to copy: whatever production actually holds, minus anything
+   * deliberately skipped. Read fresh every run so a new collection is backed
+   * up the first time it exists rather than the first time somebody remembers.
+   */
+  const discovered = await source.listCollections();
+  const COLLECTIONS = discovered
+    .map(ref => ref.id)
+    .filter(id => !SKIP_COLLECTIONS.has(id))
+    .sort();
+
+  if (COLLECTIONS.length === 0) {
+    console.error('Production reports no collections. Refusing to run — that is not a real answer.\n');
+    process.exit(1);
+  }
+
+  console.log(`Copying ${COLLECTIONS.length} collections: ${COLLECTIONS.join(', ')}\n`);
+
   if (DISCOVER) {
     for (const [label, database] of [['PRODUCTION', source], ['STAGING', target]]) {
       const found = await database.listCollections();
@@ -115,10 +147,10 @@ async function copyCollection(source, target, name) {
       if (!found.length) { console.log('    (no collections)'); continue; }
       for (const ref of found) {
         const c = await ref.count().get();
-        const known = COLLECTIONS.includes(ref.id);
+        const skipped = SKIP_COLLECTIONS.has(ref.id);
         console.log(
           `    ${ref.id.padEnd(24)} ${String(c.data().count).padStart(7)}` +
-          (known ? '' : '   <-- NOT in this script\'s collection list')
+          (skipped ? '   <-- deliberately skipped' : '')
         );
       }
     }
@@ -129,7 +161,13 @@ async function copyCollection(source, target, name) {
   if (VERIFY) {
     console.log('  collection            production    staging   match');
     let allMatch = true;
+    const stagingNames = new Set((await target.listCollections()).map(r => r.id));
     for (const name of COLLECTIONS) {
+      if (!stagingNames.has(name)) {
+        allMatch = false;
+        console.log(`  ${name.padEnd(22)}${'—'.padStart(9)}${'MISSING'.padStart(11)}   NO`);
+        continue;
+      }
       const [a, b] = await Promise.all([
         source.collection(name).count().get(),
         target.collection(name).count().get(),

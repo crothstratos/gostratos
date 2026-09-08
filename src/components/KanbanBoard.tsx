@@ -205,6 +205,15 @@ export const KanbanBoard = React.memo(function KanbanBoard({ companies, onMoveCo
   // horizontal scrollbar. Only the five active pipeline stages are columns now;
   // the two archive stages are views you switch to.
   const [boardView, setBoardView] = useState<'pipeline' | 'Watchlist' | 'Passed'>('pipeline');
+  /**
+   * Columns render a page at a time. The cap is for the drag-and-drop layer,
+   * which slows noticeably past a few hundred cards — but it used to truncate
+   * in silence, so a column holding 300 companies looked like it held 50 and
+   * nothing on screen said otherwise.
+   */
+  const COLUMN_PAGE = 50;
+  const [shownPerColumn, setShownPerColumn] = useState<Record<string, number>>({});
+
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const [cardMenuFor, setCardMenuFor] = useState<string | null>(null);
   const viewMenuRef = useRef<HTMLDivElement>(null);
@@ -556,7 +565,7 @@ export const KanbanBoard = React.memo(function KanbanBoard({ companies, onMoveCo
                           snapshot.isDraggingOver ? "bg-indigo-50/60 dark:bg-indigo-500/5" : ""
                         )}
                       >
-                        {stageCompanies.slice(0, 50).map((company, index) => (
+                        {stageCompanies.slice(0, shownPerColumn[stage] || COLUMN_PAGE).map((company, index) => (
                           <CompanyCard
                             key={company.id}
                             company={company}
@@ -580,6 +589,21 @@ export const KanbanBoard = React.memo(function KanbanBoard({ companies, onMoveCo
                           </div>
                         )}
                         {provided.placeholder}
+
+                        {stageCompanies.length > (shownPerColumn[stage] || COLUMN_PAGE) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShownPerColumn(prev => ({
+                                ...prev,
+                                [stage]: (prev[stage] || COLUMN_PAGE) + COLUMN_PAGE,
+                              }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-dashed border-slate-300 py-2 text-[12px] font-medium text-slate-500 transition-colors hover:border-indigo-400 hover:text-indigo-600 dark:border-slate-700 dark:text-slate-400"
+                          >
+                            {stageCompanies.length - (shownPerColumn[stage] || COLUMN_PAGE)} more not shown &mdash; load next {COLUMN_PAGE}
+                          </button>
+                        )}
                       </div>
                     )}
                   </Droppable>

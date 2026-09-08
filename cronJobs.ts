@@ -372,6 +372,64 @@ export async function recordPersonCheck(
  */
 const PRODUCTION_DB = "ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86";
 
+/**
+ * Exports the whole database to Cloud Storage.
+ *
+ * This is the backup that actually answers "what if someone goes rogue". The
+ * staging copy lives in the same project as production, so it survives a
+ * mistake made through the app and nothing worse — an IAM change, a deleted
+ * database, or somebody acting badly in the console takes both. An export in a
+ * separate bucket, with its own retention, is outside that blast radius.
+ *
+ * Uses the App Engine service account, which needs Cloud Datastore Import
+ * Export Admin on the project and write access to the bucket. See
+ * docs/BACKUPS.md for the one-time setup.
+ */
+export async function runFirestoreExport(): Promise<JobResult> {
+  const result: JobResult = { job: "firestore-export", scanned: 0, signals: 0, notes: [] };
+
+  const bucket = process.env.BACKUP_BUCKET;
+  if (!bucket) {
+    result.notes.push("BACKUP_BUCKET is not set — no export was taken. See docs/BACKUPS.md.");
+    return result;
+  }
+
+  const project = process.env.GOOGLE_CLOUD_PROJECT || "gen-lang-client-0128987745";
+  const database = process.env.FIRESTORE_DATABASE_ID || PRODUCTION_DB;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const prefix = `gs://${bucket.replace(/^gs:\/\//, "")}/firestore/${stamp}`;
+
+  // The Admin SDK has no export call, so this is the REST endpoint with the
+  // instance's own credentials — the same ones Firestore already uses.
+  const { GoogleAuth } = await import("google-auth-library");
+  const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/datastore"] });
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
+
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${project}/databases/${encodeURIComponent(database)}:exportDocuments`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token.token || token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ outputUriPrefix: prefix }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      `Export refused (${response.status}): ${JSON.stringify(body).slice(0, 400)}`,
+    );
+  }
+
+  result.scanned = 1;
+  result.notes.push(`Export started to ${prefix}. Operation: ${(body as any).name || "unknown"}`);
+  return result;
+}
+
 export function getDb(): Firestore {
   return getFirestore(process.env.FIRESTORE_DATABASE_ID || PRODUCTION_DB);
 }

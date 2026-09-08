@@ -9,7 +9,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
 import { fetchFirmPages, fetchHomepage, isRoleInbox, stripCitations, extractWebsite } from "./siteScrape.ts";
-import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck } from "./cronJobs.ts";
+import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
 /**
  * The Gemini model every endpoint uses.
@@ -996,6 +996,19 @@ Rules:
       res.status(500).json({ error: error.message });
     }
   });
+  app.all("/api/cron/firestore-export", async (_req, res) => {
+    try {
+      const result = await runFirestoreExport();
+      console.log("[cron] firestore-export", JSON.stringify(result));
+      res.json(result);
+    } catch (error: any) {
+      // Loud on purpose. A backup that quietly stopped running is worse than
+      // no backup, because it is a backup people believe they have.
+      console.error("[cron] firestore-export FAILED:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.all("/api/cron/site-diff", async (_req, res) => {
     try {
       const result = await runSiteDiff(getDb());
@@ -1399,7 +1412,9 @@ ${transcript}`;
     });
   }
 
-  server.on("error", (e) => {
+  // NodeJS.ErrnoException, not Error: the listener is typed as receiving a
+  // plain Error, which has no `code`, so this never compiled.
+  server.on("error", (e: NodeJS.ErrnoException) => {
     if (e.code === "EADDRINUSE") {
       console.error(`Port ${PORT} is in use, retrying...`);
       setTimeout(() => {

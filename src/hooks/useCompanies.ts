@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, runTransaction } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Company, Stage, InteractionLog } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -306,13 +306,58 @@ export function useCompanies(user: any) {
     }
   }, [user]);
 
+  /**
+   * Deletes a company, after writing the whole record to the audit trail.
+   *
+   * The audit collection previously recorded saves and nothing else, so a
+   * deletion left no trace at all: not what was removed, not by whom, not
+   * when. The only signal was that the count eventually looked wrong.
+   *
+   * The copy is taken first and the delete only proceeds if it was written.
+   * Backwards from the obvious order, and deliberately — a delete that
+   * succeeds while its record fails is exactly the case this exists to
+   * prevent, whereas a record with no delete behind it is merely untidy.
+   *
+   * audit denies update and delete in the rules, so this cannot be cleaned up
+   * afterwards by whoever did it.
+   */
   const handleDeleteCompany = useCallback(async (companyId: string) => {
     try {
-      await deleteDoc(doc(db, 'companies', companyId));
+      const ref = doc(db, 'companies', companyId);
+      const snap = await getDoc(ref);
+      const data: any = snap.exists() ? snap.data() : null;
+
+      // A company with a long interaction history can approach Firestore's 1MB
+      // document limit, and an audit entry that fails to write blocks the
+      // delete. Oversized records keep their identifying fields and a note.
+      let body: any = data;
+      let truncated = false;
+      if (data && JSON.stringify(data).length > 700_000) {
+        truncated = true;
+        body = {
+          id: data.id, name: data.name, stage: data.stage, vertical: data.vertical,
+          website: data.website, founderName: data.founderName, founderEmail: data.founderEmail,
+          basics: data.basics, dealTerms: data.dealTerms, revenue: data.revenue,
+        };
+      }
+
+      await setDoc(doc(collection(db, 'audit')), {
+        action: 'delete',
+        collectionName: 'companies',
+        companyId,
+        companyName: data?.name || '(unknown)',
+        changedBy: user?.email || 'unknown',
+        changedAt: new Date().toISOString(),
+        changedFields: ['(deleted)'],
+        deletedRecord: body,
+        deletedRecordTruncated: truncated,
+      });
+
+      await deleteDoc(ref);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'companies');
     }
-  }, []);
+  }, [user]);
 
   return {
     companies,
