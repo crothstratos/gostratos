@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { CalendarEvent } from '../types';
+import { isRestricted } from '../access';
 
 export function useEvents(user: any, accessToken?: string | null) {
   const [firebaseEvents, setFirebaseEvents] = useState<CalendarEvent[]>([]);
@@ -18,8 +19,7 @@ export function useEvents(user: any, accessToken?: string | null) {
           fetchedEvents.push({ ...d.data(), id: d.id } as CalendarEvent);
         });
 
-        const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-        const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+        const isRestrictedUser = isRestricted(user?.email);
         
         if (isRestrictedUser) {
           fetchedEvents = fetchedEvents.filter(event => 

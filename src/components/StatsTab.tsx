@@ -3,11 +3,11 @@ import { Company } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { X } from 'lucide-react';
 import { useAuth } from './AuthContext';
+import { isRestricted } from '../access';
 
 export const StatsTab = React.memo(function StatsTab({ companies, onNavigateToCRM }: { companies: Company[], onNavigateToCRM?: () => void }) {
   const { user } = useAuth();
-  const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-  const isRestrictedUser = Boolean(user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase()));
+  const isRestrictedUser = isRestricted(user?.email);
 
   const [fundFilter, setFundFilter] = useState<'Total' | 'Stratos OF' | 'Arkansas'>(isRestrictedUser ? 'Arkansas' : 'Total');
 

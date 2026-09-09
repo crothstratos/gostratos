@@ -21,7 +21,9 @@ service firebase.storage {
       return userEmail() in [
         'dwhite@gostratos.vc',
         'cjrothai@gmail.com',
-        'joe@highwayventures.com'
+        'joe@highwayventures.com',
+        'arkansas1@gostratos.vc',
+        'arkansas2@gostratos.vc'
       ];
     }
 

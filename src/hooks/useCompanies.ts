@@ -3,6 +3,7 @@ import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, runT
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Company, Stage, InteractionLog } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { isRestricted } from '../access';
 
 export function useCompanies(user: any) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -61,8 +62,7 @@ export function useCompanies(user: any) {
             fetchedCompanies.push({ ...data, id: d.id });
           });
           
-          const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-          const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+          const isRestrictedUser = isRestricted(user?.email);
           
           if (isRestrictedUser) {
             fetchedCompanies = fetchedCompanies.filter(c => c.fund === 'Arkansas' || (c.funds && c.funds.includes('Arkansas')));
@@ -197,8 +197,7 @@ export function useCompanies(user: any) {
       }
     }
     
-    const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-    const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+    const isRestrictedUser = isRestricted(user?.email);
 
     const finalCompany = { 
       ...updatedCompany, 
@@ -286,8 +285,7 @@ export function useCompanies(user: any) {
 
   const handleAddCompany = useCallback(async (newCompany: Company) => {
     try {
-      const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-      const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+      const isRestrictedUser = isRestricted(user?.email);
       
       const companyToSave = { ...newCompany };
       if (isRestrictedUser) {

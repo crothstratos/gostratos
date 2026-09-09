@@ -10,6 +10,7 @@ import { collection, getDocs, getDoc, addDoc, updateDoc, doc, setDoc, deleteDoc,
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from './AuthContext';
 import { LocationInput } from './LocationInput';
+import { isRestricted } from '../access';
 
 const STRATOS_OWNERS = [
   "Mike Abbaei",
@@ -24,8 +25,7 @@ const STRATOS_OWNERS = [
 
 export const FundraisingCRM = React.memo(function FundraisingCRM() {
   const { user } = useAuth();
-  const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-  const isRestrictedUser = Boolean(user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase()));
+  const isRestrictedUser = isRestricted(user?.email);
 
   const [fundFilter, setFundFilter] = useState<'Total' | 'Stratos OF' | 'Arkansas'>(isRestrictedUser ? 'Arkansas' : 'Total');
 

@@ -9,6 +9,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
 import { fetchFirmPages, fetchHomepage, isRoleInbox, stripCitations, extractWebsite } from "./siteScrape.ts";
+import { isAllowed } from "./src/access.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
 /**
@@ -63,12 +64,6 @@ async function startServer() {
   // Verifies the caller's Firebase ID token and applies the same access
   // policy as firestore.rules. /api/health is defined above this line and
   // stays public so App Engine can health-check the service.
-  const ALLOWED_DOMAIN = "gostratos.vc";
-  const REVOKED_EMAILS = new Set([
-    "dwhite@gostratos.vc",
-    "cjrothai@gmail.com",
-    "joe@highwayventures.com",
-  ]);
 
   /**
    * Scheduled jobs authenticate differently from people.
@@ -106,12 +101,7 @@ async function startServer() {
 
       const decoded = await getAuth().verifyIdToken(token);
       const email = (decoded.email || "").toLowerCase();
-      const allowed =
-        decoded.email_verified === true &&
-        email.endsWith("@" + ALLOWED_DOMAIN) &&
-        !REVOKED_EMAILS.has(email);
-
-      if (!allowed) {
+      if (!(decoded.email_verified === true && isAllowed(email))) {
         console.warn(`Rejected API call from unauthorized account: ${email || "unknown"}`);
         return res.status(403).json({ error: "This account is not authorized to use the Stratos VP CRM." });
       }

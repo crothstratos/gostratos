@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { auth, provider } from '../firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser, GoogleAuthProvider } from 'firebase/auth';
+import { isAllowed, isRevoked } from '../access';
 
 interface User {
   uid: string;
@@ -33,23 +34,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // message instead of a wall of permission-denied errors. The real
       // security boundary is firestore.rules / storage.rules, which are
       // enforced by Firebase and cannot be bypassed from the browser.
-      // Keep this list in sync with those files.
-      const ALLOWED_DOMAIN = 'gostratos.vc';
-      const EXTRA_ALLOWED: string[] = [];
-      const REVOKED_EMAILS = ['dwhite@gostratos.vc', 'cjrothai@gmail.com', 'joe@highwayventures.com'];
-
+      // The lists themselves live in src/access.ts.
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
-        const isRevoked = REVOKED_EMAILS.includes(email);
-        const isAllowed =
-          (email.endsWith('@' + ALLOWED_DOMAIN) || EXTRA_ALLOWED.includes(email)) && !isRevoked;
+        const revoked = isRevoked(email);
 
-        if (!isAllowed) {
+        if (!isAllowed(email)) {
           signOut(auth);
           setUser(null);
           setAccessToken(null);
           setError(
-            isRevoked
+            revoked
               ? 'Your access to this platform has been revoked.'
               : 'This Google account is not authorized to access the Stratos VP CRM.'
           );

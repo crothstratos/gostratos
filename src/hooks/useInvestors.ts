@@ -3,6 +3,7 @@ import { collection, doc, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapsh
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { InvestorRepositoryEntry } from '../types';
 import { useAuth } from '../components/AuthContext';
+import { isRestricted } from '../access';
 
 export function useInvestors() {
   const [investors, setInvestors] = useState<InvestorRepositoryEntry[]>([]);
@@ -20,8 +21,7 @@ export function useInvestors() {
           fetched.push({ ...doc.data(), id: doc.id } as InvestorRepositoryEntry);
         });
         
-        const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-        const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+        const isRestrictedUser = isRestricted(user?.email);
         
         if (isRestrictedUser) {
           // Assuming fundDetails or similar contains Arkansas for this tab, 
@@ -46,8 +46,7 @@ export function useInvestors() {
 
   const handleAddInvestor = useCallback(async (investorData: Partial<InvestorRepositoryEntry>) => {
     try {
-      const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-      const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+      const isRestrictedUser = isRestricted(user?.email);
 
       const entryData = {
         ...investorData,
@@ -74,8 +73,7 @@ export function useInvestors() {
 
   const handleUpdateInvestor = useCallback(async (id: string, investorData: Partial<InvestorRepositoryEntry>) => {
     try {
-      const RESTRICTED_EMAILS = ['arkansas1@gostratos.vc', 'arkansas2@gostratos.vc', 'jcomizio@gostratos.vc', 'lpatterson@gostratos.vc'];
-      const isRestrictedUser = user?.email && RESTRICTED_EMAILS.includes(user.email.toLowerCase());
+      const isRestrictedUser = isRestricted(user?.email);
 
       const entryData = {
         ...investorData,
