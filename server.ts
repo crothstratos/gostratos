@@ -8,8 +8,9 @@ import { parseOffice } from "officeparser";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import http from "http";
-import { fetchFirmPages, fetchHomepage, isRoleInbox, stripCitations, extractWebsite } from "./siteScrape.ts";
+import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
 import { isAllowed } from "./src/access.ts";
+import { scanFirm, discoverCoInvestors, runInvestorResearch, runFirmEnrichment } from "./investorResearch.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
 /**
@@ -263,215 +264,11 @@ Return the information strictly as a JSON object matching this schema:
       if (!url && !firmName) {
         return res.status(400).json({ error: "A website or firm name is required." });
       }
-      const ai = getGeminiAI();
-
-      // --- read the firm's own site, if we were given one
-      const pages = url ? await fetchFirmPages(String(url)) : [];
-      const siteText = pages
-        .map((p) => `--- PAGE: ${p.url} ---\n${p.text}`)
-        .join("\n\n");
-
-      // Every address printed anywhere on the pages we read. The model may
-      // only pick from this list; it may not compose one.
-      //
-      // Role inboxes are excluded here specifically. This list exists so the
-      // model can attach an address to a named partner, and info@ attached to
-      // a person reads as their personal address and gets used as one.
-      const siteEmails = [...new Set(pages.flatMap((p) => p.emails))].filter(
-        (address) => !isRoleInbox(address),
-      );
-      const emailByAddress = new Map<string, string>();
-      for (const page of pages) {
-        for (const address of page.emails) {
-          if (isRoleInbox(address)) continue;
-          if (!emailByAddress.has(address)) emailByAddress.set(address, page.url);
-        }
-      }
-
-      const subject = firmName
-        ? `the venture capital firm "${firmName}"${url ? ` (website: ${url})` : ""}`
-        : `the venture capital firm at ${url}`;
-
-      const sourceSection = pages.length
-        ? `
-Below is the text of ${pages.length} page(s) from the firm's own website. This
-is your PRIMARY source and it outranks anything you recall or find elsewhere:
-it is current, and it is the firm describing itself.
-
-For every person whose name appears in this text, set source to "website" and
-sourceUrl to the PAGE url they appeared on. Do not set source to "website" for
-anyone who is not named in the text below.
-
-${
-  siteEmails.length
-    ? `These email addresses were found printed on those pages:
-${siteEmails.join("\n")}
-
-If one of them clearly belongs to a specific person you are listing, put it in
-that person's email field, copied EXACTLY. If you are not sure whose it is,
-leave the person's email empty. Never write an address that is not on this
-list, even if the pattern seems obvious.`
-    : `No email addresses were found on those pages, so leave every person's
-email field empty.`
-}
-
-${siteText}
-`
-        : `
-No usable text could be retrieved from the firm's website (it may block
-automated readers, require a login, or render entirely in JavaScript). Fall
-back on web search, and set source to "search" for everyone you list.
-`;
-
-      const prompt = `
-You are a VC research analyst. Research ${subject}.
-${sourceSection}
-
-Report:
-1. The people who work at the firm — investment team, partners, principals,
-   operating partners. Give name, job title, which source the person came
-   from, and their email ONLY if it is in the list of addresses above.
-2. Their portfolio companies, named as the company names itself, with a brief
-   note of where you saw each listed.
-3. The firm's headquarters city.
-
-Rules, which matter more than completeness:
-- NEVER invent or infer an email address. Do not derive one from a pattern you
-  notice in the other addresses. Copy exactly from the supplied list or leave
-  the field empty. An address that looks right but is wrong is worse than none.
-- Do NOT guess at anything else either. If you are not confident a person
-  currently works there, or that a company is in their portfolio, leave it out.
-- Do not include people who have left the firm.
-- Prefer the website text over your own recollection wherever they disagree.
-- If you cannot find reliable information, return empty arrays. Returning
-  nothing is a valid and useful answer.
-`;
-
-      const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              companies: {
-                type: Type.ARRAY,
-                description: "Portfolio companies the firm has invested in",
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    evidence: { type: Type.STRING, description: "Briefly, where this was found" },
-                  },
-                },
-              },
-              people: {
-                type: Type.ARRAY,
-                description: "People currently at the firm. Never include email addresses.",
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    role: { type: Type.STRING },
-                    email: {
-                      type: Type.STRING,
-                      description: "Only an address copied exactly from the supplied list. Never composed.",
-                    },
-                    source: {
-                      type: Type.STRING,
-                      description: "'website' if named in the supplied page text, otherwise 'search'",
-                    },
-                    sourceUrl: {
-                      type: Type.STRING,
-                      description: "The page URL this person was found on, when source is 'website'",
-                    },
-                  },
-                },
-              },
-              location: { type: Type.STRING, description: "Headquarters city" },
-            },
-          },
-          tools: [{ googleSearch: {} }],
-        },
-      });
-
-      let text = response.text || "{}";
-      text = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
-
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch (err) {
-        console.error("scan-investor-firm: JSON parsing error. Raw response:", text);
-        throw err;
-      }
-
-      const pageUrls = new Set(pages.map((p) => p.url));
-      const pageText = siteText.toLowerCase();
-
-      // Belt and braces. The prompt and the schema both exclude emails; a model
-      // that returns one anyway must not have it reach the client.
-      //
-      // The source claim is verified rather than trusted: a person is only
-      // labelled as coming from the website if their name is actually in the
-      // text we fetched. Without this check "website" would mean "the model
-      // said website", which is exactly the assurance we are trying to avoid.
-      const rawPeople = Array.isArray(data.people) ? data.people : [];
-      const seenPeople = new Set<string>();
-      const cleanPeople = rawPeople
-        .filter((p: any) => p && typeof p.name === "string" && p.name.trim() !== "")
-        .map((p: any) => {
-          const name = String(p.name).trim();
-          const claimedUrl = p.sourceUrl ? String(p.sourceUrl).trim() : "";
-          // Named in text we actually fetched. Not proof of employment, but it
-          // is proof the firm's own site says so, which is the claim being made.
-          const verified = pages.length > 0 && pageText.includes(name.toLowerCase());
-
-          // The address must be one we read off the page. The prompt says so
-          // too, but a prompt is a request and this is the enforcement: a model
-          // that helpfully constructs first.last@firm.com gets it dropped here,
-          // silently and every time.
-          const claimedEmail = p.email ? String(p.email).trim().toLowerCase() : "";
-          const emailIsReal = claimedEmail !== "" && emailByAddress.has(claimedEmail);
-
-          return {
-            name,
-            role: p.role ? String(p.role).trim() : undefined,
-            email: emailIsReal ? claimedEmail : undefined,
-            emailSourceUrl: emailIsReal ? emailByAddress.get(claimedEmail) : undefined,
-            source: verified ? "website" : "search",
-            sourceUrl: verified && pageUrls.has(claimedUrl) ? claimedUrl : undefined,
-          };
-        })
-        .filter((p: any) => {
-          const key = p.name.toLowerCase();
-          if (seenPeople.has(key)) return false;
-          seenPeople.add(key);
-          return true;
-        });
-
-      const rawCompanies = Array.isArray(data.companies) ? data.companies : [];
-      const seenCompanies = new Set<string>();
-      const cleanCompanies = rawCompanies
-        .filter((c: any) => c && typeof c.name === "string" && c.name.trim() !== "")
-        .map((c: any) => ({
-          name: String(c.name).trim(),
-          evidence: c.evidence ? String(c.evidence).trim() : undefined,
-        }))
-        .filter((c: any) => {
-          const key = c.name.toLowerCase();
-          if (seenCompanies.has(key)) return false;
-          seenCompanies.add(key);
-          return true;
-        });
-
-      res.json({
-        companies: cleanCompanies,
-        people: cleanPeople,
-        location: typeof data.location === "string" ? data.location : undefined,
-        pagesRead: pages.map((p) => p.url),
-      });
+      // The research itself lives in investorResearch.ts so the overnight job
+      // runs exactly this code rather than a copy of it. The email rules in
+      // particular are not something to maintain in two places.
+      const result = await scanFirm(getGeminiAI(), GEMINI_MODEL, { url, firmName });
+      res.json(result);
     } catch (error) {
       console.error("Error scanning investor firm:", error);
       res.status(500).json({ error: "Failed to scan firm" });
@@ -498,244 +295,13 @@ Rules, which matter more than completeness:
       if (!firmName) {
         return res.status(400).json({ error: "A firm name is required." });
       }
-      const ai = getGeminiAI();
-
-      const normalise = (v: string) => String(v).toLowerCase().replace(/[^a-z0-9]/g, "");
-      const selfKey = normalise(firmName);
-      const knownSet = new Set(
-        (Array.isArray(knownFirms) ? knownFirms : []).map((k: any) => normalise(String(k))),
-      );
-
-      // Bounded: each of these is a grounded call, and they run together.
-      const MAX_COMPANIES = 8;
-      let portfolio: string[] = (Array.isArray(portfolioCompanies) ? portfolioCompanies : [])
-        .filter((c: any) => typeof c === "string" && c.trim() !== "")
-        .map((c: string) => c.trim());
-
-      // With no portfolio on file there is nothing to fan out over, so one
-      // call establishes some first.
-      if (portfolio.length === 0) {
-        const seed = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: `Using web search, list up to ${MAX_COMPANIES} companies that the venture firm "${firmName}"${
-            website ? ` (${website})` : ""
-          } has invested in. Return only company names you can evidence.`,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: { companies: { type: Type.ARRAY, items: { type: Type.STRING } } },
-            },
-            tools: [{ googleSearch: {} }],
-          },
-        });
-        try {
-          const parsed = JSON.parse(
-            (seed.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
-          );
-          portfolio = (parsed.companies || [])
-            .filter((c: any) => typeof c === "string")
-            .map((c: string) => stripCitations(c).trim())
-            .filter(Boolean);
-        } catch {
-          portfolio = [];
-        }
-      }
-
-      const examined = portfolio.slice(0, MAX_COMPANIES);
-      if (examined.length === 0) {
-        return res.json({
-          coInvestors: [],
-          diagnostics: { returned: 0, dropped: 0, companiesExamined: [] },
-        });
-      }
-
-      // --- one focused question per company, run together
-      const perCompany = await Promise.all(
-        examined.map(async (company) => {
-          try {
-            const response = await ai.models.generateContent({
-              model: GEMINI_MODEL,
-              contents: `
-Using web search, list the investors that have participated in funding rounds
-for the company "${company}". We already know ${firmName} is an investor.
-
-For each other investor, give the firm's name and which round they took part in
-(for example "Series A, 2023"). Include every investor you can evidence, not
-just the well-known ones.
-
-Do not invent investors. If you cannot establish who backed this company,
-return an empty array. Do not include citation markers in any field.
-`,
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    investors: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          firmName: { type: Type.STRING },
-                          round: { type: Type.STRING },
-                        },
-                      },
-                    },
-                  },
-                },
-                tools: [{ googleSearch: {} }],
-              },
-            });
-
-            const parsed = JSON.parse(
-              (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
-            );
-            const investors = (parsed.investors || [])
-              .map((i: any) => ({
-                firmName: stripCitations(String(i?.firmName || "")).trim(),
-                round: stripCitations(String(i?.round || "")).trim(),
-              }))
-              .filter((i: any) => i.firmName !== "" && normalise(i.firmName) !== selfKey);
-            return { company, investors };
-          } catch (err: any) {
-            console.warn(`[coinvestors] ${company}: ${err.message}`);
-            return { company, investors: [] as { firmName: string; round: string }[] };
-          }
-        }),
-      );
-
-      // --- aggregate: a firm's weight is how many of these rounds it shared
-      const byFirm = new Map<
-        string,
-        { firmName: string; sharedDeals: string[]; rounds: string[] }
-      >();
-
-      for (const { company, investors } of perCompany) {
-        for (const investor of investors) {
-          const key = normalise(investor.firmName);
-          const entry = byFirm.get(key);
-          if (entry) {
-            if (!entry.sharedDeals.includes(company)) {
-              entry.sharedDeals.push(company);
-              if (investor.round) entry.rounds.push(`${company} (${investor.round})`);
-            }
-          } else {
-            byFirm.set(key, {
-              firmName: investor.firmName,
-              sharedDeals: [company],
-              rounds: investor.round ? [`${company} (${investor.round})`] : [],
-            });
-          }
-        }
-      }
-
-      const ranked = [...byFirm.values()]
-        .sort((a, b) => b.sharedDeals.length - a.sharedDeals.length)
-        .slice(0, 20);
-
-      // --- one call to profile the firms actually worth showing
-      let profiles: Record<string, any> = {};
-      if (ranked.length > 0) {
-        try {
-          const response = await ai.models.generateContent({
-            model: GEMINI_MODEL,
-            contents: `
-Using web search, profile each of these venture investors:
-
-${ranked.map((r) => `- ${r.firmName}`).join("\n")}
-
-For each, give: a one or two sentence description of what they do, the stages
-they invest at, their typical check size if it is reported anywhere, the
-sectors they focus on, and their website.
-
-Leave a field empty rather than guessing at it. Write plain prose with no
-citation markers, reference numbers or bracketed indices.
-`,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  firms: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        firmName: { type: Type.STRING },
-                        description: { type: Type.STRING },
-                        stages: { type: Type.STRING },
-                        checkSize: { type: Type.STRING },
-                        sectors: { type: Type.STRING },
-                        website: { type: Type.STRING },
-                      },
-                    },
-                  },
-                },
-              },
-              tools: [{ googleSearch: {} }],
-            },
-          });
-
-          const parsed = JSON.parse(
-            (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
-          );
-          for (const firm of parsed.firms || []) {
-            if (firm?.firmName) profiles[normalise(String(firm.firmName))] = firm;
-          }
-        } catch (err: any) {
-          console.warn(`[coinvestors] profiling failed: ${err.message}`);
-        }
-      }
-
-      const text_ = (v: any, cap = 400): string | undefined => {
-        if (typeof v !== "string") return undefined;
-        const t = stripCitations(v).slice(0, cap).trim();
-        return t === "" ? undefined : t;
-      };
-
-      const cleaned = ranked.map((r) => {
-        const profile = profiles[normalise(r.firmName)] || {};
-        return {
-          firmName: r.firmName,
-          description: text_(profile.description, 400),
-          stages: text_(profile.stages, 120),
-          checkSize: text_(profile.checkSize, 80),
-          sectors: text_(profile.sectors, 160),
-          website: profile.website ? extractWebsite(String(profile.website)) : undefined,
-          sharedDeals: r.sharedDeals,
-          rounds: r.rounds.slice(0, 6),
-          alreadyInRepository: knownSet.has(normalise(r.firmName)),
-          emails: [] as string[],
-        };
+      const result = await discoverCoInvestors(getGeminiAI(), GEMINI_MODEL, {
+        firmName,
+        website,
+        portfolioCompanies,
+        knownFirms,
       });
-
-      // Addresses come off each firm's own homepage, never from the model.
-      await Promise.all(
-        cleaned.map(async (c) => {
-          if (!c.website) return;
-          try {
-            const home = await fetchHomepage(c.website);
-            if (home) c.emails = home.emails.slice(0, 3);
-          } catch {
-            /* a firm whose site will not load simply has no addresses */
-          }
-        }),
-      );
-
-      console.log(
-        `[coinvestors] ${firmName}: examined ${examined.length} companies, ` +
-          `found ${byFirm.size} distinct firms, returning ${cleaned.length}`,
-      );
-
-      res.json({
-        coInvestors: cleaned,
-        diagnostics: {
-          returned: byFirm.size,
-          dropped: byFirm.size - cleaned.length,
-          companiesExamined: examined,
-        },
-      });
+      res.json(result);
     } catch (error) {
       console.error("Error discovering firm co-investors:", error);
       res.status(500).json({ error: "Failed to research co-investors" });
@@ -995,6 +561,76 @@ Rules:
       // Loud on purpose. A backup that quietly stopped running is worse than
       // no backup, because it is a backup people believe they have.
       console.error("[cron] firestore-export FAILED:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Works through the investor repository: who works at each firm, and who
+   * each firm invests alongside.
+   *
+   * Runs nightly and takes a slice, rather than the whole list at once. Three
+   * reasons, all of which bite: App Engine kills a request at ten minutes, the
+   * grounded searches are metered, and a firm researched tonight is not worth
+   * researching again tomorrow. It works through the repository over weeks and
+   * then keeps it fresh, which is the shape of the job whatever the schedule
+   * says.
+   *
+   * Query parameters exist for running it by hand. ?dryRun=1 researches
+   * nothing and reports what a real run would write — the way to find out how
+   * many firms a full pass would add before letting it add them.
+   */
+  app.all("/api/cron/investor-research", async (req, res) => {
+    const num = (name: string, fallback?: number) => {
+      const raw = req.query[name];
+      const n = Number(Array.isArray(raw) ? raw[0] : raw);
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    try {
+      const result = await runInvestorResearch(getDb(), getGeminiAI(), GEMINI_MODEL, {
+        dryRun: req.query.dryRun === "1" || req.query.dryRun === "true",
+        maxInvestors: num("max", Number(process.env.RESEARCH_FIRMS_PER_NIGHT) || undefined),
+        maxNewFirms: num("maxNewFirms", Number(process.env.RESEARCH_MAX_NEW_FIRMS) || undefined),
+        budgetMs: num("budgetMs"),
+        refreshAfterDays: num("refreshAfterDays"),
+        includeDiscovered: req.query.includeDiscovered === "1",
+      });
+      console.log("[cron] investor-research", JSON.stringify(result));
+      res.json(result);
+    } catch (error: any) {
+      console.error("[cron] investor-research failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Fills in the profile of every firm still waiting for one.
+   *
+   * The research job discovers firms and creates them thin; this reads each
+   * one's own website and fills in the mandate — stages, check size, verticals,
+   * fund details, the investment team. Runs an hour after the research pass so
+   * a firm found tonight has a profile by morning.
+   *
+   * ?includeThin=1 also sweeps up firms somebody created by hand that have
+   * never had a mandate recorded.
+   */
+  app.all("/api/cron/enrich-firms", async (req, res) => {
+    const num = (name: string, fallback?: number) => {
+      const raw = req.query[name];
+      const n = Number(Array.isArray(raw) ? raw[0] : raw);
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    try {
+      const result = await runFirmEnrichment(getDb(), getGeminiAI(), GEMINI_MODEL, {
+        dryRun: req.query.dryRun === "1" || req.query.dryRun === "true",
+        maxFirms: num("max", Number(process.env.ENRICH_FIRMS_PER_NIGHT) || undefined),
+        budgetMs: num("budgetMs"),
+        includeThinManualFirms: req.query.includeThin === "1",
+      });
+      console.log("[cron] enrich-firms", JSON.stringify(result));
+      res.json(result);
+    } catch (error: any) {
+      console.error("[cron] enrich-firms failed:", error);
       res.status(500).json({ error: error.message });
     }
   });

@@ -458,6 +458,28 @@ export async function runFirestoreExport(db: Firestore): Promise<JobResult> {
   return result;
 }
 
+let dbInstance: Firestore | null = null;
+
+/**
+ * The database the jobs run against.
+ *
+ * ignoreUndefinedProperties is not a nicety here. The Admin SDK, unlike the
+ * browser client in src/firebase.ts, THROWS on an undefined field value rather
+ * than skipping it — and every record these jobs write is full of optional
+ * fields that are undefined whenever the research did not establish them. A
+ * person with no email, a company with no evidence, a firm with no check size:
+ * without this, each of those takes down the write that contains it.
+ *
+ * Memoised because settings() may only be called once per instance.
+ */
 export function getDb(): Firestore {
-  return getFirestore(process.env.FIRESTORE_DATABASE_ID || PRODUCTION_DB);
+  if (dbInstance) return dbInstance;
+  const db = getFirestore(process.env.FIRESTORE_DATABASE_ID || PRODUCTION_DB);
+  try {
+    db.settings({ ignoreUndefinedProperties: true });
+  } catch {
+    /* already configured by an earlier caller; the setting is what matters */
+  }
+  dbInstance = db;
+  return dbInstance;
 }

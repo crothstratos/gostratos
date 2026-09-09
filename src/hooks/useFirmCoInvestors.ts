@@ -18,13 +18,19 @@ export function useFirmCoInvestors() {
   /** How many firms the research named, and how many lacked a shared deal. */
   const [diagnostics, setDiagnostics] = useState<{ returned: number; dropped: number; companiesExamined?: string[] } | null>(null);
 
-  /** Returns how many co-investors were found, or null if it could not run. */
+  /**
+   * Returns the co-investors found, or null if the research could not run.
+   *
+   * The rows themselves, not a count: the caller has to persist them, and an
+   * earlier version that returned only a number is why nine grounded calls
+   * used to be thrown away every time somebody closed the modal.
+   */
   const discover = async (opts: {
     firmName: string;
     website?: string;
     portfolioCompanies?: string[];
     knownFirms?: string[];
-  }): Promise<number | null> => {
+  }): Promise<CoInvestorSuggestion[] | null> => {
     if (!opts.firmName) return null;
     setIsSearching(true);
     setError(null);
@@ -51,7 +57,7 @@ export function useFirmCoInvestors() {
       setResults(rows);
       setDiagnostics(data.diagnostics || null);
       setHasRun(true);
-      return rows.length;
+      return rows;
     } catch (err: any) {
       const message = err.message || 'Unknown error';
       if (/quota|429|exhausted/i.test(message)) {

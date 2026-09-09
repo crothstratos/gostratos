@@ -21,14 +21,40 @@ export function CoInvestorPanel({
   allFirms: InvestorRepositoryEntry[];
   /** Adds a recommended firm to the repository as a new entry. */
   onAdd?: (suggestion: CoInvestorSuggestion) => void;
-  /** Records that this firm has now been worked through, and with what result. */
-  onResearched?: (found: number) => void;
+  /** Saves the result on the firm, so it is still here next time. */
+  onResearched?: (rows: CoInvestorSuggestion[]) => void;
 }) {
   const { results, discover, isSearching, error, hasRun, diagnostics } = useFirmCoInvestors();
   const [added, setAdded] = React.useState<Set<string>>(new Set());
 
+  const key = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  /**
+   * What to show: this session's research if it has been run, otherwise
+   * whatever is stored on the firm — from a previous visit or from the
+   * overnight pass.
+   *
+   * `alreadyInRepository` is recomputed rather than read from the stored row.
+   * It was true or false on the night the research ran, and the whole point of
+   * the Add button is that the answer changes.
+   */
+  const shown: CoInvestorSuggestion[] = React.useMemo(() => {
+    const rows = hasRun ? results : (firm.coInvestors || []);
+    const known = new Set(allFirms.map(f => key(f.firmName)));
+    return [...rows]
+      .map(r => ({ ...r, alreadyInRepository: known.has(key(r.firmName)) }))
+      .sort((a, b) => {
+        const inRepo = Number(a.alreadyInRepository) - Number(b.alreadyInRepository);
+        if (inRepo !== 0) return inRepo;
+        return (b.sharedDeals?.length || 0) - (a.sharedDeals?.length || 0);
+      });
+  }, [hasRun, results, firm.coInvestors, allFirms]);
+
+  const researchedAt = firm.coInvestorsResearchedAt;
+  const hasResult = hasRun || Boolean(researchedAt);
+
   const run = async () => {
-    const found = await discover({
+    const rows = await discover({
       firmName: firm.firmName || '',
       website: firm.website,
       portfolioCompanies: firm.portfolioCompanies || [],
@@ -37,13 +63,18 @@ export function CoInvestorPanel({
     // Recorded even when the answer is zero: "we looked and found nothing" is
     // a result, and marking only successful runs would leave the firms most
     // worth revisiting looking untouched.
-    if (found !== null && onResearched) onResearched(found);
+    if (rows !== null && onResearched) onResearched(rows);
   };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-lg font-medium text-slate-900 dark:text-white">Who they invest alongside</h3>
+        {researchedAt && !isSearching && (
+          <span className="text-[11.5px] text-slate-400">
+            researched {new Date(researchedAt).toLocaleDateString()}
+          </span>
+        )}
         <button
           type="button"
           onClick={run}
@@ -51,7 +82,7 @@ export function CoInvestorPanel({
           className="ml-auto flex items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 transition-colors hover:bg-indigo-100 disabled:opacity-50 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-900/50"
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles size={16} />}
-          {isSearching ? 'Researching…' : hasRun ? 'Research again' : 'Find co-investors'}
+          {isSearching ? 'Researching…' : hasResult ? 'Research again' : 'Find co-investors'}
         </button>
       </div>
 
@@ -66,7 +97,7 @@ export function CoInvestorPanel({
         </p>
       )}
 
-      {isSearching && results.length === 0 && (
+      {isSearching && shown.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-12 text-center dark:border-slate-800">
           <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-400" />
           <p className="mt-2.5 text-[13px] text-slate-500 dark:text-slate-400">
@@ -75,7 +106,7 @@ export function CoInvestorPanel({
         </div>
       )}
 
-      {!isSearching && hasRun && results.length === 0 && (
+      {!isSearching && hasResult && shown.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-12 text-center dark:border-slate-800">
           <p className="text-[13px] text-slate-500 dark:text-slate-400">
             {diagnostics && diagnostics.returned > 0
@@ -89,7 +120,7 @@ export function CoInvestorPanel({
         </div>
       )}
 
-      {!isSearching && !hasRun && (
+      {!isSearching && !hasResult && (
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-12 text-center dark:border-slate-800">
           <Users className="mx-auto h-5 w-5 text-slate-300 dark:text-slate-700" />
           <p className="mt-2.5 text-[13px] text-slate-500 dark:text-slate-400">
@@ -98,9 +129,9 @@ export function CoInvestorPanel({
         </div>
       )}
 
-      {results.length > 0 && (
+      {shown.length > 0 && (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {results.map(c => {
+          {shown.map(c => {
             const isAdded = added.has(c.firmName);
             return (
               <div

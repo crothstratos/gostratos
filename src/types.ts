@@ -418,6 +418,52 @@ export interface InvestorRepositoryEntry {
   coInvestorsFound?: number;
   /** Set when a scan produced nothing, to distinguish "not scanned" from "nothing found". */
   lastScanFoundNothing?: boolean;
+
+  /**
+   * The co-investor research, kept.
+   *
+   * This used to live in component state and was gone the moment the modal
+   * closed — nine grounded calls, paid for, discarded, and re-run from scratch
+   * the next time anyone opened the tab. Storing it is what lets the panel
+   * show a result without asking whether you would like to buy it again.
+   */
+  coInvestors?: CoInvestorSuggestion[];
+
+  /** When the overnight research pass last worked through this firm. */
+  lastAutoResearchAt?: string;
+  /** Why it failed, when it did. Cleared on the next success. */
+  autoResearchError?: string | null;
+
+  /**
+   * How this record came to exist.
+   *
+   * 'co-investor-discovery' means the overnight job created it after finding
+   * the firm on a cap table alongside one we already track. That marker is
+   * what makes an automatic write reversible: these can be filtered out of any
+   * view and deleted as a group, which is the only reason it is safe to let a
+   * scheduled job add records at all. Absent means a person created it.
+   */
+  sourceKind?: 'co-investor-discovery';
+  /** For a discovered firm: who we found them alongside, and on what deals. */
+  discoveredVia?: {
+    firmId?: string;
+    firmName: string;
+    sharedDeals: string[];
+    foundAt: string;
+  };
+
+  /**
+   * Whether this firm's profile has been read off its own website yet.
+   *
+   * Discovered firms are created thin and filled in by a second pass, so that
+   * one slow website cannot eat the budget meant for researching the next firm
+   * on the list.
+   */
+  enrichmentState?: 'pending' | 'done' | 'failed';
+  enrichedAt?: string;
+  /** The pages the profile was read from. Provenance you can click. */
+  enrichedFrom?: string[];
+  enrichmentError?: string | null;
 }
 
 

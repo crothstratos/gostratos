@@ -39,3 +39,23 @@ cron:
     url: /api/cron/people-watch
     schedule: every wednesday 06:30
     timezone: America/Chicago
+
+  - description: >-
+      Work through the investor repository: who works at each firm, and who
+      each firm invests alongside. Takes a slice each night rather than the
+      whole list — App Engine kills a request at ten minutes, the grounded
+      searches are metered, and a firm researched tonight is not worth
+      researching again tomorrow. Works through the repository over weeks, then
+      keeps it fresh.
+    url: /api/cron/investor-research
+    schedule: every day 01:30
+    timezone: America/Chicago
+
+  - description: >-
+      Fill in the profile of every firm still waiting for one — stages, check
+      size, verticals, fund details, the investment team — read from the firm's
+      own website. An hour after the research pass, so a firm discovered
+      tonight has a profile by morning.
+    url: /api/cron/enrich-firms
+    schedule: every day 02:30
+    timezone: America/Chicago

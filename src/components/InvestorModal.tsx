@@ -980,10 +980,14 @@ export const InvestorModal = React.memo(function InvestorModal({ investor, onClo
                 firm={formData}
                 allFirms={allFirms}
                 onAdd={handleAddCoInvestor}
-                onResearched={(found) =>
+                onResearched={(rows) =>
                   applyAndPersist({
+                    // The rows themselves, not just the count. Nine grounded
+                    // calls used to be discarded on close and paid for again
+                    // on the next open.
+                    coInvestors: rows,
                     coInvestorsResearchedAt: new Date().toISOString(),
-                    coInvestorsFound: found,
+                    coInvestorsFound: rows.length,
                   })
                 }
               />
