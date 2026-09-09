@@ -129,6 +129,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Written by the scheduled jobs only. Holds things like when the last
+    // backup was taken — a fact about the system, not a record anyone authors.
+    match /system/{id} {
+      allow read: if hasAccess();
+      allow write: if false;
+    }
+
     // Append-only, and this time it actually is: nothing else matches these
     // documents, so create is the only write that any rule permits.
     match /audit/{entry} {

@@ -998,7 +998,7 @@ Rules:
   });
   app.all("/api/cron/firestore-export", async (_req, res) => {
     try {
-      const result = await runFirestoreExport();
+      const result = await runFirestoreExport(getDb());
       console.log("[cron] firestore-export", JSON.stringify(result));
       res.json(result);
     } catch (error: any) {

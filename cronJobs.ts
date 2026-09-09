@@ -385,12 +385,32 @@ const PRODUCTION_DB = "ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86";
  * Export Admin on the project and write access to the bucket. See
  * docs/BACKUPS.md for the one-time setup.
  */
-export async function runFirestoreExport(): Promise<JobResult> {
+export async function runFirestoreExport(db: Firestore): Promise<JobResult> {
   const result: JobResult = { job: "firestore-export", scanned: 0, signals: 0, notes: [] };
+
+  /**
+   * A failed backup is reported into the app, not just the logs.
+   *
+   * Nobody reads server logs at 3am, and the failure mode here is the worst
+   * kind: everything looks normal, and the backup people believe they have has
+   * not run for six weeks. Surfacing it in Signals means a broken backup is as
+   * visible as anything else that needs attention.
+   */
+  const reportFailure = async (why: string) => {
+    const day = new Date().toISOString().slice(0, 10);
+    await emit(db, `backup_failed_${day}`, {
+      kind: "site-change",   // rendered generically; the headline carries it
+      headline: "Nightly backup did not run",
+      detail: `${why}\n\nUntil this is fixed there is no off-project copy of the database. See docs/BACKUPS.md.`,
+      weight: 9,
+    }).catch(() => { /* if even this cannot be written, the logs are all we have */ });
+  };
 
   const bucket = process.env.BACKUP_BUCKET;
   if (!bucket) {
-    result.notes.push("BACKUP_BUCKET is not set — no export was taken. See docs/BACKUPS.md.");
+    const why = "BACKUP_BUCKET is not set, so there is nowhere to write to.";
+    result.notes.push(why + " See docs/BACKUPS.md.");
+    await reportFailure(why);
     return result;
   }
 
@@ -420,10 +440,18 @@ export async function runFirestoreExport(): Promise<JobResult> {
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      `Export refused (${response.status}): ${JSON.stringify(body).slice(0, 400)}`,
-    );
+    const why = `Firestore refused the export (${response.status}): ${JSON.stringify(body).slice(0, 300)}`;
+    await reportFailure(why);
+    throw new Error(why);
   }
+
+  // Recorded so the app can show when the last good backup was taken. A date
+  // somebody can look at beats an assurance that it is running.
+  await db.collection("system").doc("backup").set({
+    lastExportAt: new Date().toISOString(),
+    lastExportPrefix: prefix,
+    operation: (body as any).name || null,
+  }).catch(() => { /* the export is already running; this is only bookkeeping */ });
 
   result.scanned = 1;
   result.notes.push(`Export started to ${prefix}. Operation: ${(body as any).name || "unknown"}`);
