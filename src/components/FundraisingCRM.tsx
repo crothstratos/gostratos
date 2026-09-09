@@ -53,7 +53,6 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
-  const [isAnalyzingEmail, setIsAnalyzingEmail] = useState(false);
   const [newInvestor, setNewInvestor] = useState<Partial<InvestorProfile>>({
     firmName: '',
     website: '',
@@ -591,40 +590,6 @@ export const FundraisingCRM = React.memo(function FundraisingCRM() {
     }
   };
 
-  const handleAnalyzeEmail = async () => {
-    if (!newActivity.notes || !selectedInvestor) return;
-    setIsAnalyzingEmail(true);
-    try {
-      const response = await apiFetch('/api/analyze-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emailContent: newActivity.notes,
-          investorType: selectedInvestor.type
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze email.");
-      }
-      
-      setNewActivity({
-        ...newActivity,
-        notes: `[AI Summary]\n${data.summary}\n\n[Next Steps]\n${data.nextSteps}\n\n[Original Content]\n${newActivity.notes}`
-      });
-    } catch (e: any) {
-      
-      const msg = e.message || '';
-      if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('429') || msg.toLowerCase().includes('exhausted')) {
-        console.warn('Rate limit exceeded. Suppressing error alert.');
-      } else {
-        alert("Failed to analyze email: " + msg);
-      }
-
-    } finally {
-      setIsAnalyzingEmail(false);
-    }
-  };
 
 
 
@@ -1931,21 +1896,6 @@ service cloud.firestore {
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">Notes / Email Content</label>
-                        {newActivity.type === 'Email' && newActivity.notes && (
-                          <button
-                            type="button"
-                            onClick={handleAnalyzeEmail}
-                            disabled={isAnalyzingEmail}
-                            className="flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 disabled:opacity-50 transition-colors"
-                          >
-                            {isAnalyzingEmail ? (
-                              <div className="h-3 w-3 animate-spin rounded-full border-2 border-indigo-600/30 border-t-indigo-600 dark:border-indigo-400/30 dark:border-t-indigo-400" />
-                            ) : (
-                              <Wand2 size={12} />
-                            )}
-                            Analyze Next Steps
-                          </button>
-                        )}
                       </div>
                       <textarea 
                         value={newActivity.notes}

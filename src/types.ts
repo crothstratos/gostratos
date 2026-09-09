@@ -119,6 +119,16 @@ export interface InteractionLog {
   date: string;
   type: 'Meeting' | 'Email' | 'Call' | 'Other';
   notes: string;
+  /**
+   * Set when this was logged by the Gmail sync rather than typed by a person.
+   * Keeps an automatically captured touch distinguishable from one somebody
+   * chose to record — the same rule the AI suggestions follow.
+   */
+  source?: 'gmail-auto';
+  /** The Gmail thread this came from. Also what stops it being logged twice. */
+  gmailThreadId?: string;
+  /** Whose mailbox it was read from. */
+  loggedBy?: string;
   nextSteps?: string;
   statusUpdate?: string;
   sentiment: 'Positive' | 'Neutral' | 'Negative';
@@ -481,6 +491,8 @@ export interface Company {
   monthlyBurn?: string;
   /** What they intend to do with the raise. */
   useOfFunds?: string;
+  /** When the Gmail sync last looked at this company's founder. */
+  lastGmailSyncAt?: string;
   conversationSummary?: {
     summary: string;
     nextSteps: string[];

@@ -8,6 +8,7 @@ import { LogIn, Loader2 } from 'lucide-react';
 import { useCompanies } from './hooks/useCompanies';
 import { databaseId, isProductionData } from './firebase';
 import { useEvents } from './hooks/useEvents';
+import { useGmailSync } from './hooks/useGmailSync';
 
 const KanbanBoard = React.lazy(() => import('./components/KanbanBoard').then(module => ({ default: module.KanbanBoard })));
 const StatsTab = React.lazy(() => import('./components/StatsTab').then(module => ({ default: module.StatsTab })));
@@ -19,6 +20,8 @@ const CalendarView = React.lazy(() => import('./components/CalendarView').then(m
 // of that component. Restore this import and its route when it runs on real data.
 const FundraisingCRM = React.lazy(() => import('./components/FundraisingCRM').then(module => ({ default: module.FundraisingCRM })));
 const InvestorsTab = React.lazy(() => import('./components/InvestorsTab').then(module => ({ default: module.InvestorsTab })));
+// Runs for the whole session, not per tab: mail is synced while the CRM is
+// open regardless of which screen somebody is looking at.
 const SourcingTab = React.lazy(() => import('./components/SourcingTab').then(module => ({ default: module.SourcingTab })));
 const SignalsTab = React.lazy(() => import('./components/SignalsTab').then(module => ({ default: module.SignalsTab })));
 const ShortlistTab = React.lazy(() => import('./components/ShortlistTab').then(module => ({ default: module.ShortlistTab })));
@@ -39,6 +42,7 @@ export default function App() {
 function AppContent() {
   const { user, isLoading: isAuthLoading, error, login, accessToken } = useAuth();
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -53,6 +57,11 @@ function AppContent() {
     handleAddCompany: originalHandleAddCompany,
     handleDeleteCompany: originalHandleDeleteCompany
   } = useCompanies(user);
+
+  // Logs founder email conversations as interactions while the app is open.
+  // Declared after useCompanies because it needs both the company list and the
+  // save path. See the hook for why this runs in the browser and not on cron.
+  useGmailSync(user, accessToken, companies, handleSaveCompany);
 
   const {
     events,
