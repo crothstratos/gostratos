@@ -35,6 +35,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { runInvestorResearch, runFirmEnrichment } from "../investorResearch.ts";
+import { readBudget, MONTHLY_FREE_GROUNDED, SCHEDULED_CEILING } from "../aiBudget.ts";
 
 const PROJECT_ID = "gen-lang-client-0128987745";
 const STAGING_DB = "staging";
@@ -136,28 +137,47 @@ const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
     // plus a seed call for a firm with no portfolio on file.
     const perFirm = 10;
     const passCalls = due * perFirm + withoutPortfolio;
-    const perNight = Number(process.env.RESEARCH_FIRMS_PER_NIGHT) || 10;
-    const nights = due === 0 ? 0 : Math.ceil(due / perNight);
+    const enrichCalls = pendingEnrich * 1.3;
 
-    console.log("\nWhat a full pass costs");
+    const budget = await readBudget(db);
+
+    console.log("\nThis month's grounding allowance");
+    console.log("--------------------------------");
+    console.log(`  free searches per month          ${String(MONTHLY_FREE_GROUNDED).padStart(6)}`);
+    console.log(`  held back for people in the app  ${String(MONTHLY_FREE_GROUNDED - SCHEDULED_CEILING).padStart(6)}`);
+    console.log(`  ceiling for scheduled jobs       ${String(SCHEDULED_CEILING).padStart(6)}`);
+    console.log(`  used so far (${budget.period})           ${String(budget.used).padStart(6)}`);
+    console.log(`  LEFT for scheduled jobs          ${String(budget.remaining).padStart(6)}`);
+
+    // What the free ceiling actually buys, per month. This is the number that
+    // decides the schedule — not how fast a night could go, but how much a
+    // month is allowed to cost, which is zero.
+    const firmsPerMonth = Math.floor(SCHEDULED_CEILING / perFirm);
+    const monthsForPass = due === 0 ? 0 : Math.ceil(due / Math.max(firmsPerMonth, 1));
+    const firmsPerNight = Math.max(1, Math.floor(firmsPerMonth / 30));
+
+    console.log("\nWhat a full pass needs");
     console.log("----------------------");
     console.log(`  grounded searches per firm     ~${perFirm}`);
-    console.log(`  grounded searches for the pass ~${passCalls.toLocaleString()}`);
-    console.log(`  enrichment, 1 per new firm     + however many firms get discovered`);
+    console.log(`  firms due                       ${due}`);
+    console.log(`  searches for the whole pass    ~${passCalls.toLocaleString()}`);
+    console.log(`  firms waiting for a profile     ${pendingEnrich}  (~${Math.round(enrichCalls).toLocaleString()} more searches)`);
     console.log("");
-    console.log(`  at ${perNight} firms a night, a full pass takes ${nights} night(s).`);
-    console.log("");
-    console.log(`  Google's grounding allowance is 5,000 free searches a month,`);
-    console.log(`  then $14 per 1,000. This pass is ~${passCalls.toLocaleString()} searches, so`);
-    if (passCalls <= 5000) {
-      console.log(`  it fits inside the free allowance.`);
+    console.log(`  Inside the free allowance that is ~${firmsPerMonth} firms a month,`);
+    console.log(`  or about ${firmsPerNight} a night.`);
+    if (monthsForPass <= 1) {
+      console.log(`  A full pass fits in one month, free.`);
     } else {
-      const billable = passCalls - 5000;
-      console.log(`  roughly ${billable.toLocaleString()} of them are billable — about $${((billable / 1000) * 14).toFixed(0)}, once.`);
-      console.log(`  Spread over ${nights} nights that is ~${Math.ceil(passCalls / Math.max(nights, 1)).toLocaleString()} a night.`);
+      console.log(`  A full pass takes about ${monthsForPass} months at no cost.`);
+      console.log(`  Paying for it instead would be ~$${(((passCalls - SCHEDULED_CEILING) / 1000) * 14).toFixed(0)} once.`);
     }
+    console.log("");
+    console.log(`  The jobs stop on their own when the allowance runs out, so`);
+    console.log(`  the schedule cannot overspend it — a busier schedule just`);
+    console.log(`  finishes the month's work earlier and then idles.`);
     console.log(`\n  Nothing was called and nothing was written. Add --dry-run --max=3`);
-    console.log(`  to research three firms for real and see what it would write.\n`);
+    console.log(`  to research three firms for real (~30 searches) and see what it`);
+    console.log(`  would write.\n`);
     return;
   }
 

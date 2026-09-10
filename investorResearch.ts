@@ -8,6 +8,7 @@ import {
   extractWebsite,
 } from "./siteScrape.ts";
 import type { JobResult } from "./cronJobs.ts";
+import { readBudget, recordGrounded, SCHEDULED_CEILING } from "./aiBudget.ts";
 
 /**
  * Researching a venture firm: who works there, and who they invest alongside.
@@ -54,6 +55,14 @@ export interface FirmScan {
   people: ScannedPerson[];
   location?: string;
   pagesRead: string[];
+  /**
+   * Grounded searches this cost.
+   *
+   * Reported rather than estimated. The free allowance is 5,000 a month and
+   * the only way to stop before crossing it is to know what was actually
+   * spent, not what a comment guessed a call would spend.
+   */
+  groundedCalls: number;
 }
 
 export async function scanFirm(
@@ -262,6 +271,7 @@ Rules, which matter more than completeness:
     people,
     location: typeof data.location === "string" ? stripCitations(data.location).trim() : undefined,
     pagesRead: pages.map((p) => p.url),
+    groundedCalls: 1,
   };
 }
 
@@ -315,6 +325,8 @@ export interface CoInvestor {
 export interface CoInvestorResult {
   coInvestors: CoInvestor[];
   diagnostics: { returned: number; dropped: number; companiesExamined: string[] };
+  /** Grounded searches this cost: a seed call if needed, one per company, one to profile. */
+  groundedCalls: number;
 }
 
 /**
@@ -348,6 +360,8 @@ export async function discoverCoInvestors(
   // Bounded: each of these is a grounded call, and they run together.
   const MAX_COMPANIES = opts.maxCompanies ?? 8;
 
+  let groundedCalls = 0;
+
   let portfolio: string[] = (opts.portfolioCompanies || [])
     .filter((c) => typeof c === "string" && c.trim() !== "")
     .map((c) => c.trim());
@@ -369,6 +383,7 @@ export async function discoverCoInvestors(
         tools: [{ googleSearch: {} }],
       },
     });
+    groundedCalls++;
     try {
       const parsed = JSON.parse(
         (seed.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
@@ -384,8 +399,14 @@ export async function discoverCoInvestors(
 
   const examined = portfolio.slice(0, MAX_COMPANIES);
   if (examined.length === 0) {
-    return { coInvestors: [], diagnostics: { returned: 0, dropped: 0, companiesExamined: [] } };
+    return {
+      coInvestors: [],
+      diagnostics: { returned: 0, dropped: 0, companiesExamined: [] },
+      groundedCalls,
+    };
   }
+  // One per company, whether or not each one comes back with anything.
+  groundedCalls += examined.length;
 
   // --- one focused question per company, run together
   const perCompany = await Promise.all(
@@ -511,6 +532,7 @@ citation markers, reference numbers or bracketed indices.
         },
       });
 
+      groundedCalls++;
       const parsed = JSON.parse(
         (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
       );
@@ -569,6 +591,7 @@ citation markers, reference numbers or bracketed indices.
       dropped: byFirm.size - cleaned.length,
       companiesExamined: examined,
     },
+    groundedCalls,
   };
 }
 
@@ -660,6 +683,35 @@ export async function runInvestorResearch(
     notes: [],
   };
 
+  /**
+   * What is left of the month's free grounding allowance.
+   *
+   * Checked before the repository is even read, because the cheapest way to
+   * not spend money is to stop before starting. A research pass over one firm
+   * is about ten grounded searches, so the job needs at least that much
+   * headroom to do anything useful at all.
+   */
+  // The worst case, not the average: a team scan, a seed call when no
+  // portfolio is on file, eight round lookups and a profiling call. Rounding
+  // the guard down would let the last firm of the month start with nine
+  // searches left and finish having spent eleven.
+  const COST_PER_FIRM = 11;
+  // A dry run is checked against the budget like any other, because a dry run
+  // makes exactly the same grounded searches as a real one — it is the writes
+  // it holds back, not the spending. "Costs nothing" is the estimate mode in
+  // scripts/research-dry-run.ts, which calls no model at all.
+  const budget = await readBudget(db);
+  if (budget.remaining < COST_PER_FIRM) {
+    result.notes.push(
+      `Stopped before starting: ${budget.used} of ${budget.ceiling} grounded searches ` +
+        `already used this month (${budget.allowance} free, ${budget.allowance - budget.ceiling} ` +
+        `held back for people using the app). Resets on the 1st.`,
+    );
+    return result;
+  }
+  let spent = 0;
+  const spendable = budget.remaining;
+
   // --- the whole repository, read once: it is both the work queue and the
   //     index that stops the same co-investor being created twice.
   const snap = await db.collection(INVESTORS).get();
@@ -727,6 +779,16 @@ export async function runInvestorResearch(
       break;
     }
 
+    // Same reasoning applied to money. A firm started with four searches left
+    // in the allowance spends ten, and the last six are billed.
+    if (spent + COST_PER_FIRM > spendable) {
+      stoppedEarly = true;
+      result.notes.push(
+        `Stopped after ${result.scanned} firms — the month's free grounding allowance is spent.`,
+      );
+      break;
+    }
+
     try {
       const scan = await scanFirm(ai, model, {
         url: candidate.website || undefined,
@@ -749,6 +811,14 @@ export async function runInvestorResearch(
         knownFirms: knownFirmNames,
       });
       coInvestorsFound += co.coInvestors.length;
+
+      // Counted as spent whatever happens next. The searches have been made;
+      // a write that fails afterwards does not refund them.
+      const cost = scan.groundedCalls + co.groundedCalls;
+      spent += cost;
+      // Recorded even on a dry run. The searches were made; a counter that
+      // ignores them is a counter that lets the next real run overspend.
+      await recordGrounded(db, cost).catch(() => { /* counted next time */ });
 
       // --- what to create, decided before anything is written
       const toCreate = co.coInvestors.filter(
@@ -974,6 +1044,10 @@ export async function runInvestorResearch(
       `${coInvestorsFound} co-investors found, ${firmsCreated} new firms ${dryRun ? "would be " : ""}created.`,
   );
   if (failures) result.notes.push(`${failures} firm(s) failed.`);
+  result.notes.push(
+    `${spent} grounded search(es) used; ${Math.max(0, spendable - spent)} left of this month's ` +
+      `${SCHEDULED_CEILING} for scheduled jobs.`,
+  );
   if (firmsCreated >= maxNewFirms) {
     result.notes.push(`Hit the ${maxNewFirms}-firm creation cap for this run.`);
   }
@@ -1057,6 +1131,8 @@ export interface FirmProfile {
   /** Role inboxes and the like — a way in when no named address was printed. */
   firmEmails: string[];
   pagesRead: string[];
+  /** Grounded searches this cost: one to profile, plus one if the website had to be found. */
+  groundedCalls: number;
 }
 
 /**
@@ -1085,6 +1161,7 @@ export async function enrichFirm(
 ): Promise<FirmProfile> {
   const firmName = opts.firmName;
   let website = (opts.website || "").trim();
+  let groundedCalls = 0;
 
   // No website on file, so establish one before there is anything to read.
   // Cheaper than it looks: without it every field below comes from
@@ -1103,6 +1180,7 @@ export async function enrichFirm(
           tools: [{ googleSearch: {} }],
         },
       });
+      groundedCalls++;
       const parsed = JSON.parse(
         (found.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
       );
@@ -1219,6 +1297,8 @@ Rules that outrank completeness:
     },
   });
 
+  groundedCalls++;
+
   let data: any = {};
   try {
     data = JSON.parse(
@@ -1279,6 +1359,7 @@ Rules that outrank completeness:
     people,
     firmEmails: firmEmails.slice(0, 3),
     pagesRead: pages.map((p) => p.url),
+    groundedCalls,
   };
 }
 
@@ -1315,8 +1396,22 @@ export async function runFirmEnrichment(
 
   const result: JobResult = { job: "firm-enrichment", scanned: 0, signals: 0, notes: [] };
 
+  // Roughly one grounded search per firm, two when the website has to be found
+  // first. Cheap next to a research pass, which is why this job can work
+  // through many more firms in a night on the same allowance.
+  const COST_PER_FIRM = 2;
+  const budget = await readBudget(db);
+  if (budget.remaining < COST_PER_FIRM) {
+    result.notes.push(
+      `Stopped before starting: ${budget.used} of ${budget.ceiling} grounded searches ` +
+        `already used this month. Resets on the 1st.`,
+    );
+    return result;
+  }
+  let spent = 0;
+
   const snap = await db.collection(INVESTORS).get();
-  const queue: { id: string; firmName: string; website: string }[] = [];
+  const queue: { id: string; firmName: string; website: string; deals: number }[] = [];
 
   snap.forEach((doc) => {
     const v = doc.data() as any;
@@ -1333,8 +1428,27 @@ export async function runFirmEnrichment(
       !String(v.investmentStage || "").trim() &&
       !(Array.isArray(v.verticals) ? v.verticals.length : String(v.verticals || "").trim());
 
-    if (pending || thin) queue.push({ id: doc.id, firmName, website: String(v.website || "").trim() });
+    if (pending || thin) {
+      queue.push({
+        id: doc.id,
+        firmName,
+        website: String(v.website || "").trim(),
+        deals: Array.isArray(v.discoveredVia?.sharedDeals) ? v.discoveredVia.sharedDeals.length : 0,
+      });
+    }
   });
+
+  /**
+   * Best-evidenced firms first.
+   *
+   * The queue can grow faster than a capped budget drains it — one researched
+   * firm can turn up fifteen co-investors — so which end of it gets filled in
+   * matters more than the backlog's length. A firm that shared four rounds
+   * with someone we already track is worth knowing about; one that shared a
+   * single round can wait, and waiting costs nothing because the record
+   * already carries what the co-investor research established.
+   */
+  queue.sort((a, b) => b.deals - a.deals);
 
   result.notes.push(`${queue.length} firm(s) waiting for a profile, taking up to ${maxFirms}.`);
   if (dryRun) result.notes.push("DRY RUN — nothing will be written.");
@@ -1348,10 +1462,20 @@ export async function runFirmEnrichment(
       result.notes.push(`Stopped after ${result.scanned} firms — out of time.`);
       break;
     }
+    if (spent + COST_PER_FIRM > budget.remaining) {
+      result.notes.push(
+        `Stopped after ${result.scanned} firms — the month's free grounding allowance is spent.`,
+      );
+      break;
+    }
 
     try {
       const profile = await enrichFirm(ai, model, { firmName: firm.firmName, website: firm.website });
       result.scanned++;
+      spent += profile.groundedCalls;
+      // Recorded whatever happens next, on a dry run too: the searches were
+      // made and no later outcome un-makes them.
+      await recordGrounded(db, profile.groundedCalls).catch(() => { /* counted next time */ });
 
       if (dryRun) {
         if (profile.checkSize || profile.investmentStage || profile.verticals) filled++;
@@ -1491,6 +1615,10 @@ export async function runFirmEnrichment(
   result.notes.push(
     `${result.scanned} firm(s) profiled, ${filled} with a mandate, ` +
       `${peopleAdded} people added${failures ? `, ${failures} failed` : ""}.`,
+  );
+  result.notes.push(
+    `${spent} grounded search(es) used; ${Math.max(0, budget.remaining - spent)} left of this ` +
+      `month's ${SCHEDULED_CEILING} for scheduled jobs. ${Math.max(0, queue.length - result.scanned)} firm(s) still queued.`,
   );
 
   if (!dryRun) {

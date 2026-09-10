@@ -11,6 +11,7 @@ import http from "http";
 import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
 import { isAllowed } from "./src/access.ts";
 import { scanFirm, discoverCoInvestors, runInvestorResearch, runFirmEnrichment } from "./investorResearch.ts";
+import { noteGrounded } from "./aiBudget.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
 /**
@@ -216,6 +217,7 @@ Return the information strictly as a JSON object matching this schema:
           tools: [{ googleSearch: {} }],
         },
       });
+      noteGrounded(getDb(), 1);   // scan-website
 
       let text = response.text || "{}";
       text = text
@@ -268,6 +270,10 @@ Return the information strictly as a JSON object matching this schema:
       // runs exactly this code rather than a copy of it. The email rules in
       // particular are not something to maintain in two places.
       const result = await scanFirm(getGeminiAI(), GEMINI_MODEL, { url, firmName });
+      // Counted against the same monthly allowance the scheduled jobs draw on,
+      // so a night of research cannot quietly spend what somebody clicking
+      // Research tomorrow morning was going to need.
+      noteGrounded(getDb(), result.groundedCalls);
       res.json(result);
     } catch (error) {
       console.error("Error scanning investor firm:", error);
@@ -301,6 +307,7 @@ Return the information strictly as a JSON object matching this schema:
         portfolioCompanies,
         knownFirms,
       });
+      noteGrounded(getDb(), result.groundedCalls);
       res.json(result);
     } catch (error) {
       console.error("Error discovering firm co-investors:", error);
@@ -360,6 +367,7 @@ Return the information strictly as a JSON object matching this schema:
           tools: [{ googleSearch: {} }],
         },
       });
+      noteGrounded(getDb(), 1);   // discover-coinvestors
 
       let text = response.text || "{}";
       text = text
@@ -446,6 +454,7 @@ Rules:
           tools: [{ googleSearch: {} }],
         },
       });
+      noteGrounded(getDb(), 1);   // enrich-company
 
       let text = response.text || "{}";
       text = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
@@ -697,6 +706,7 @@ than no answer:
               tools: [{ googleSearch: {} }],
             },
           });
+          noteGrounded(getDb(), 1);   // people-watch: one grounded check per person
 
           let text = (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
           const verdict = JSON.parse(text);
