@@ -24,6 +24,7 @@
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+const { explainAndExit } = require('./_credentials.cjs');
 
 const PROJECT_ID = 'gen-lang-client-0128987745';
 const STAGING_DB = 'staging';
@@ -157,7 +158,4 @@ const BATCH_SIZE = 200;
     process.stdout.write(`  removed ${removed}/${discovered.length}\r`);
   }
   console.log(`\nRemoved ${removed} discovered firm(s). Copies are in the audit collection.\n`);
-})().catch((err) => {
-  console.error('\nFailed:', err.message);
-  process.exit(1);
-});
+})().catch(explainAndExit);

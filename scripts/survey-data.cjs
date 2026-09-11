@@ -12,6 +12,7 @@
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+const { explainAndExit } = require('./_credentials.cjs');
 
 const PROJECT_ID = 'gen-lang-client-0128987745';
 const READ_DB = 'staging';
@@ -157,7 +158,4 @@ function report(title, map, total) {
     (companyRevenue.get('stated as none')?.count || 0);
 
   console.log(`\nCompany.revenue: ${confidentCompany} convert automatically, ~${Math.max(0, needsReview)} need a human decision.\n`);
-})().catch(err => {
-  console.error('\nFailed:', err.message);
-  process.exit(1);
-});
+})().catch(explainAndExit);

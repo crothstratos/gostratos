@@ -20,6 +20,7 @@
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+const { explainAndExit } = require('./_credentials.cjs');
 
 const PROJECT_ID = 'gen-lang-client-0128987745';
 const STAGING_DB = 'staging';
@@ -157,7 +158,4 @@ function planFor(company) {
   }
   if (inBatch) { await batch.commit(); written += inBatch; }
   console.log(`\nRepaired ${written} companies.\n`);
-})().catch(err => {
-  console.error('\nFailed:', err.message);
-  process.exit(1);
-});
+})().catch(explainAndExit);

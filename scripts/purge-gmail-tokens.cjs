@@ -16,6 +16,7 @@
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { explainAndExit } = require('./_credentials.cjs');
 
 const PROJECT_ID = 'gen-lang-client-0128987745';
 const STAGING_DB = 'staging';
@@ -118,4 +119,4 @@ const preview = (value) => {
   console.log('  until the app\'s access is revoked, which has to be done per account at');
   console.log('  https://myaccount.google.com/permissions');
   console.log('');
-})().catch(err => { console.error('\nFailed:', err.message); process.exit(1); });
+})().catch(explainAndExit);

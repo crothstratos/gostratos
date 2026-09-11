@@ -31,6 +31,7 @@
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+const { explainAndExit } = require('./_credentials.cjs');
 
 const PROJECT_ID = 'gen-lang-client-0128987745';
 const SOURCE_DB = 'ai-studio-e212f446-e1ec-4969-b746-7a8ec637da86';
@@ -202,7 +203,4 @@ async function copyCollection(source, target, name) {
     process.exit(1);
   }
   console.log('Done.\n');
-})().catch(err => {
-  console.error('\nFailed:', err.message);
-  process.exit(1);
-});
+})().catch(explainAndExit);

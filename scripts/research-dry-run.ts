@@ -207,6 +207,20 @@ const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
       : `\n  Done. ${result.signals} signal(s) written.\n`
   );
 })().catch((err) => {
-  console.error("\nFailed:", err?.message || err);
+  // Same classification as scripts/_credentials.cjs. Repeated rather than
+  // imported because this file is TypeScript run through tsx and that one is
+  // CommonJS; the message is what matters and it must not differ.
+  const message = String(err?.message || err);
+  if (/invalid_grant|invalid_rapt|reauth related error|Could not load the default credentials|Getting metadata from plugin failed|UNAUTHENTICATED/i.test(message)) {
+    console.error("\n  Your Google credentials have expired.\n");
+    console.error("  Run this, then try again:\n");
+    console.error("      gcloud auth application-default login\n");
+    console.error('  Note "application-default" — that is the one local scripts use.');
+    console.error("  Plain `gcloud auth login` signs in the gcloud command instead, which");
+    console.error("  is why deploys keep working while this does not.\n");
+    console.error(`  (original error: ${message.slice(0, 200)})\n`);
+    process.exit(1);
+  }
+  console.error("\nFailed:", message);
   process.exit(1);
 });
