@@ -6,6 +6,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { apiFetch } from '../services/api';
 import { SourcingCandidate, InvestorRepositoryEntry, Company } from '../types';
 import { normaliseCompanyName, buildCompanyIndex } from '../companyMatch';
+import { recordPerson } from '../peopleDirectory';
 
 /**
  * Companies our investors have backed that we are not tracking.
@@ -175,6 +176,30 @@ export function useSourcing(
         researchedAt: new Date().toISOString(),
         researchNote: found ? null : 'Nothing solid found for this name.',
       });
+
+      /**
+       * The founder joins the people directory as soon as we know their name.
+       *
+       * Here rather than when the company is promoted, because a name found
+       * tonight is worth having whether or not anyone moves the row: the
+       * person is real, they run a company one of our investors backed, and a
+       * dismissed sourcing row should not take them with it.
+       *
+       * The email is only attached when the research attributed it to them by
+       * name. An alternate address — info@, support@ — belongs to the company
+       * and is deliberately not carried onto a person's contact card.
+       */
+      if (data.founderName) {
+        void recordPerson(
+          {
+            name: String(data.founderName),
+            email: data.founderEmail || undefined,
+            affiliation: candidate.name,
+            source: 'sourcing',
+          },
+          candidate.name,
+        );
+      }
     } catch (err: any) {
       const message = err.message || 'Unknown error';
       // Marked failed rather than left pending, so the queue moves on instead

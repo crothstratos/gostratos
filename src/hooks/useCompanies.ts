@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Company, Stage, InteractionLog } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { isRestricted } from '../access';
+import { recordCompanyPeople } from '../peopleDirectory';
 
 export function useCompanies(user: any) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -266,6 +267,11 @@ export function useCompanies(user: any) {
       });
 
       ownWrites.current.set(updatedCompany.id, now);
+
+      // Only once the transaction has committed. A founder recorded against a
+      // save that then lost a conflict would be a person in the directory who
+      // was never actually written to a company.
+      void recordCompanyPeople(finalCompany);
     } catch (error: any) {
       if (error?.__conflict === 'changed') {
         alert(
@@ -299,6 +305,14 @@ export function useCompanies(user: any) {
       );
       
       await setDoc(doc(db, 'companies', companyToSave.id), cleanCompany);
+
+      // The founder joins the people directory.
+      //
+      // Deliberately after the company is saved and deliberately not awaited
+      // into the caller's failure path: recording a person is a consequence of
+      // adding a company, never a condition of it. If the directory write is
+      // refused the company is still there, which is the right way round.
+      void recordCompanyPeople(companyToSave);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.CREATE, 'companies');
     }

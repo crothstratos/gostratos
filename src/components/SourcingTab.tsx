@@ -7,6 +7,8 @@ import { Company, InvestorRepositoryEntry, SourcingCandidate, Stage } from '../t
 import { useSourcing } from '../hooks/useSourcing';
 import { useInvestors } from '../hooks/useInvestors';
 import { cn } from '../utils';
+import { scoreSourcingCandidate } from '../fitScore';
+import { FitDial } from './FitDial';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -52,6 +54,18 @@ export function SourcingTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
 
+  /**
+   * Every row with its fit against the mandate, best first.
+   *
+   * Scored here rather than stored, because the score is a pure function of
+   * the row and src/mandate.ts: editing the mandate re-ranks the whole list on
+   * the next render, with nothing to migrate and nothing to go stale. It costs
+   * nothing to compute, so there is no reason to persist it.
+   *
+   * Ties break on how many of our investors backed the company — two firms
+   * arriving independently is the signal this tab exists to surface — and then
+   * on name, so the order never wobbles between renders.
+   */
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return candidates
@@ -60,12 +74,12 @@ export function SourcingTab({
         || c.name.toLowerCase().includes(q)
         || (c.description || '').toLowerCase().includes(q)
         || (c.sourceFirms || []).some(f => f.firmName.toLowerCase().includes(q)))
+      .map(c => ({ c, fit: scoreSourcingCandidate(c) }))
       .sort((a, b) => {
-        // Companies more than one of our investors backed come first: two
-        // firms independently is a stronger signal than one.
-        const firms = (b.sourceFirms?.length || 0) - (a.sourceFirms?.length || 0);
+        if (b.fit.score !== a.fit.score) return b.fit.score - a.fit.score;
+        const firms = (b.c.sourceFirms?.length || 0) - (a.c.sourceFirms?.length || 0);
         if (firms !== 0) return firms;
-        return a.name.localeCompare(b.name);
+        return a.c.name.localeCompare(b.c.name);
       });
   }, [candidates, filter, query]);
 
@@ -222,7 +236,7 @@ export function SourcingTab({
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {visible.map(c => {
+            {visible.map(({ c, fit }) => {
               const isResearching = researchingId === c.id;
               const isMoving = movingId === c.id;
               return (
@@ -335,7 +349,15 @@ export function SourcingTab({
                     )}
                   </div>
 
-                  <div className="mt-auto flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                  {/*
+                    Buttons on the left, dial on the right, both sitting on the
+                    bottom edge. The dial is in the flow rather than floated
+                    over the corner: a 76px badge positioned absolutely lands
+                    on top of whichever button happens to wrap onto a second
+                    line at narrow widths.
+                  */}
+                  <div className="mt-auto flex items-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                    <div className="flex flex-1 flex-wrap items-center gap-2 pb-1.5">
                     {c.status === 'dismissed' ? (
                       <>
                         <button
@@ -385,7 +407,10 @@ export function SourcingTab({
                         )}
                       </>
                     )}
+                    </div>
+                    <FitDial fit={fit} label="Fit" />
                   </div>
+
                 </div>
               );
             })}

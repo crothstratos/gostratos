@@ -195,7 +195,7 @@ function AppContent() {
               />
             )}
             {activeTab === 'fundraising' && <FundraisingCRM />}
-            {activeTab === 'investors' && <InvestorsTab onCompanyClick={setSelectedCompany} />}
+            {activeTab === 'investors' && <InvestorsTab companies={companies} onCompanyClick={setSelectedCompany} />}
             {activeTab === 'signals' && (
               <SignalsTab companies={companies} onCompanyClick={setSelectedCompany} />
             )}

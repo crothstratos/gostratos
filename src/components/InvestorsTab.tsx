@@ -8,10 +8,21 @@ import { useGemini } from '../hooks/useGemini';
 import { useInvestors } from '../hooks/useInvestors';
 import { useStaleInvestors } from '../hooks/useInvestorFit';
 import { AlertCircle, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { scoreInvestor, ourCompanyNameSet } from '../fitScore';
+import { FitDial } from './FitDial';
 
 export const InvestorsTab = React.memo(function InvestorsTab({
+  companies = [],
   onCompanyClick,
 }: {
+  /**
+   * The pipeline, for the similarity score's overlap component.
+   *
+   * Passed down rather than subscribed to here: App already holds it, and a
+   * second onSnapshot on the same collection is a second read bill and a
+   * second chance for the two lists to disagree.
+   */
+  companies?: Company[];
   /** Opens a portfolio company's profile from inside an investor. */
   onCompanyClick?: (company: Company) => void;
 } = {}) {
@@ -56,16 +67,33 @@ export const InvestorsTab = React.memo(function InvestorsTab({
     notes: '',
   });
 
+  /** Built once per pipeline change, not once per firm. */
+  const pipelineNames = React.useMemo(() => ourCompanyNameSet(companies), [companies]);
+
+  /**
+   * Every firm with how much it looks like us, most similar first.
+   *
+   * Similarity, not quality. A large growth fund scores low here and should:
+   * the question is whether we would be in the same rooms, which is what makes
+   * a firm worth a coffee, a co-investment or a warm introduction.
+   */
   const filteredInvestors = React.useMemo(() => {
-    if (!searchQuery.trim()) return investors;
-    const query = searchQuery.toLowerCase();
-    return investors.filter(i => 
-      (i.firmName || '').toLowerCase().includes(query) || 
-      formatLocation(i.location).toLowerCase().includes(query) ||
-      (i.contactName || '').toLowerCase().includes(query) ||
-      (Array.isArray(i.verticals) ? i.verticals.join(',') : i.verticals || '').toLowerCase().includes(query)
-    );
-  }, [searchQuery, investors]);
+    const query = searchQuery.trim().toLowerCase();
+    const matches = !query
+      ? investors
+      : investors.filter(i =>
+          (i.firmName || '').toLowerCase().includes(query) ||
+          formatLocation(i.location).toLowerCase().includes(query) ||
+          (i.contactName || '').toLowerCase().includes(query) ||
+          (Array.isArray(i.verticals) ? i.verticals.join(',') : i.verticals || '').toLowerCase().includes(query)
+        );
+    return matches
+      .map(investor => ({ investor, fit: scoreInvestor(investor, pipelineNames) }))
+      .sort((a, b) => {
+        if (b.fit.score !== a.fit.score) return b.fit.score - a.fit.score;
+        return (a.investor.firmName || '').localeCompare(b.investor.firmName || '');
+      });
+  }, [searchQuery, investors, pipelineNames]);
 
   const handleOpenModal = (investor?: InvestorRepositoryEntry) => {
     if (investor) {
@@ -268,7 +296,7 @@ export const InvestorsTab = React.memo(function InvestorsTab({
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {filteredInvestors.map(investor => (
+            {filteredInvestors.map(({ investor, fit }) => (
               <div 
                 key={investor.id}
                 onClick={() => handleOpenModal(investor)}
@@ -380,6 +408,19 @@ export const InvestorsTab = React.memo(function InvestorsTab({
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/*
+                  Bottom right, matching the Sourcing tab exactly. Same dial,
+                  same scale, same colours — a 70 means the same kind of thing
+                  in both places, which is the only reason showing the two
+                  side by side is useful.
+                */}
+                <div className="mt-4 flex items-end justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
+                  <p className="pb-2 text-[11px] leading-snug text-slate-400 dark:text-slate-500">
+                    How close their<br />mandate is to ours
+                  </p>
+                  <FitDial fit={fit} label="Similarity" />
                 </div>
               </div>
             ))}
