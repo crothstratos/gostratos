@@ -124,9 +124,22 @@ export interface InteractionLog {
    * Keeps an automatically captured touch distinguishable from one somebody
    * chose to record — the same rule the AI suggestions follow.
    */
-  source?: 'gmail-auto';
+  source?: 'gmail-auto' | 'granola';
   /** The Gmail thread this came from. Also what stops it being logged twice. */
   gmailThreadId?: string;
+  /** The Granola note this was written from. */
+  granolaNoteId?: string;
+  /**
+   * Identifies the MEETING rather than the note.
+   *
+   * Two people at the firm both running Granola produce two notes of the same
+   * call, with different note ids and the same calendar event — so the
+   * calendar event is the meeting's identity and this is what stops one call
+   * appearing twice on a company.
+   */
+  granolaMeetingKey?: string;
+  /** Link back to the full note and transcript in Granola. */
+  granolaUrl?: string | null;
   /** Whose mailbox it was read from. */
   loggedBy?: string;
   nextSteps?: string;
@@ -572,6 +585,27 @@ export interface Company {
   monthlyBurn?: string;
   /** What they intend to do with the raise. */
   useOfFunds?: string;
+  /**
+   * Where an automatically filled field came from.
+   *
+   * Keyed by field name. Every entry carries the sentence that was actually
+   * said on the call, so a figure on this record can be traced to its source
+   * rather than taken on trust — an extracted number nobody can check looks
+   * exactly like one a person verified, which is the more dangerous of the
+   * two.
+   */
+  fieldSources?: Record<string, {
+    source: 'granola';
+    noteId: string;
+    quote: string;
+    meetingTitle?: string | null;
+    at: string;
+    url?: string | null;
+  }>;
+
+  /** When a Granola note was last filed against this company. */
+  lastGranolaSyncAt?: string;
+
   /** When the Gmail sync last looked at this company's founder. */
   lastGmailSyncAt?: string;
   conversationSummary?: {

@@ -57,7 +57,7 @@ service cloud.firestore {
     //
     // Collections in use: attachments, audit, companies, company_data_pool,
     // contacts, events, investor_repository, investors, sourcing, signals,
-    // portfolio_snapshots, site_snapshots, people_watch.
+    // portfolio_snapshots, site_snapshots, people_watch, granola_unmatched.
 
     match /companies/{id} {
       allow read, write: if hasAccess();
@@ -116,6 +116,16 @@ service cloud.firestore {
     // Job state and history. Read-only from the browser — these are the
     // baselines every signal is measured against, and an edit here would
     // quietly change what "changed" means.
+    // Granola notes that could not be matched to a company. Written only by
+    // the server, which uses the Admin SDK and bypasses these rules; the app
+    // reads them so an unrecognised company is visible rather than lost, and
+    // can dismiss one.
+    match /granola_unmatched/{id} {
+      allow read: if hasAccess();
+      allow update, delete: if hasAccess();
+      allow create: if false;
+    }
+
     match /portfolio_snapshots/{id} {
       allow read: if hasAccess();
       allow write: if false;

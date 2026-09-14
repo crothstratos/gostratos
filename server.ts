@@ -11,7 +11,11 @@ import http from "http";
 import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
 import { isAllowed } from "./src/access.ts";
 import { scanFirm, discoverCoInvestors, runInvestorResearch, runFirmEnrichment } from "./investorResearch.ts";
-import { noteGrounded, assertCanSpend, BudgetExhausted } from "./aiBudget.ts";
+import { noteGrounded, assertCanSpend, BudgetExhausted, HARD_STOP } from "./aiBudget.ts";
+import {
+  verifyGranolaSignature, getNote, matchNote, meetingKey,
+  extractFacts, buildInteractionNote, EXTRACTABLE,
+} from "./granola.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
 /**
@@ -61,6 +65,195 @@ async function startServer() {
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
+
+  /**
+   * Files one Granola note against the company the meeting was with.
+   *
+   * Matching is deterministic and happens before any model is involved: if we
+   * cannot say which company this was, the note is parked for review rather
+   * than filed somewhere plausible. A confidential call on the wrong
+   * company's record is the failure this whole path is arranged to avoid.
+   */
+  async function ingestGranolaNote(noteId: string, eventType: string): Promise<void> {
+    const db = getDb();
+    const note = await getNote(noteId);
+
+    // --- which company
+    const snap = await db.collection("companies").get();
+    const companies = snap.docs.map((d) => {
+      const v = d.data() as any;
+      return { id: d.id, name: String(v.name || ""), website: v.website, founderEmail: v.founderEmail };
+    });
+
+    const match = matchNote(note, companies);
+    const key = meetingKey(note);
+
+    if (!match) {
+      // Recorded, not discarded. An unmatched note is usually a company we do
+      // not track yet, which is worth seeing rather than losing.
+      await db.collection("granola_unmatched").doc(noteId).set({
+        noteId,
+        title: note.title || note.calendar_event?.title || null,
+        occurredAt: note.calendar_event?.scheduled_start_time || note.created_at || null,
+        attendees: (note.attendees || []).map((a) => a?.email).filter(Boolean),
+        webUrl: note.web_url || null,
+        meetingKey: key,
+        seenAt: new Date().toISOString(),
+      });
+      console.log(`[granola] ${noteId}: no company matched; parked for review`);
+      return;
+    }
+
+    const ref = db.collection("companies").doc(match.companyId);
+    const doc = await ref.get();
+    if (!doc.exists) return;
+    const company = doc.data() as any;
+
+    // --- already logged?
+    //
+    // Two people at the firm both running Granola produce two notes of the
+    // same call. They arrive as separate deliveries with different note ids
+    // and the same calendar event, so the calendar event is what identifies
+    // the meeting. An edit to a note we already filed updates that entry
+    // rather than adding a second one.
+    const existing: any[] = Array.isArray(company.interactions) ? company.interactions : [];
+    const already = existing.find((i) => i?.granolaMeetingKey === key);
+    if (already && eventType === "note.generated") {
+      console.log(`[granola] ${noteId}: this meeting is already on ${match.companyName}`);
+      return;
+    }
+
+    // --- read the company's own figures out of the call, for blanks only
+    let facts: any[] = [];
+    const blanks = EXTRACTABLE.map((f) => f.field).filter(
+      (field) => String(company[field] || "").trim() === "",
+    );
+
+    if (blanks.length && !HARD_STOP) {
+      try {
+        // Not a grounded call, so it draws no search quota — but it is still
+        // a model call, and AI_HARD_STOP must silence every one of those.
+        facts = await extractFacts(getGeminiAI(), GEMINI_MODEL, Type, note, blanks);
+      } catch (error: any) {
+        // The summary is the point; the extraction is a bonus. A company must
+        // still get its call logged when the extraction fails.
+        console.warn(`[granola] ${noteId}: extraction failed: ${error?.message || error}`);
+      }
+    }
+
+    // --- write
+    const occurredAt =
+      note.calendar_event?.scheduled_start_time || note.created_at || new Date().toISOString();
+
+    const entry = {
+      id: already?.id || crypto.randomUUID(),
+      date: occurredAt,
+      type: "Meeting" as const,
+      notes: buildInteractionNote(note, match, facts),
+      sentiment: "Neutral" as const,
+      source: "granola" as const,
+      granolaNoteId: noteId,
+      granolaMeetingKey: key,
+      granolaUrl: note.web_url || null,
+      loggedBy: note.owner?.email || null,
+    };
+
+    const patch: Record<string, unknown> = {
+      interactions: already
+        ? existing.map((i) => (i?.granolaMeetingKey === key ? entry : i))
+        : [entry, ...existing],
+      lastGranolaSyncAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+    };
+
+    // Blank fields only, and each one stamped with where it came from. A
+    // figure on a company record that nobody can trace back to a sentence
+    // somebody said is worth less than an empty field, because it looks
+    // exactly like one a person checked.
+    const sources: Record<string, unknown> = { ...(company.fieldSources || {}) };
+    for (const fact of facts) {
+      if (String(company[fact.field] || "").trim() !== "") continue;
+      patch[fact.field] = fact.value;
+      sources[fact.field] = {
+        source: "granola",
+        noteId,
+        quote: fact.quote,
+        meetingTitle: note.title || note.calendar_event?.title || null,
+        at: occurredAt,
+        url: note.web_url || null,
+      };
+    }
+    if (Object.keys(sources).length) patch.fieldSources = sources;
+
+    await ref.update(patch);
+    console.log(
+      `[granola] ${noteId}: filed on ${match.companyName} (${match.basis}); ` +
+        `${facts.length} field(s) filled`,
+    );
+  }
+
+  /**
+   * Granola calls this when it has finished writing up a meeting.
+   *
+   * Mounted ABOVE the authentication gate and above the JSON body parser, and
+   * both of those placements are load-bearing.
+   *
+   * Above the gate, because Granola has no Firebase account and cannot present
+   * a token. Its HMAC signature is what authenticates it instead — the same
+   * shape of argument as the X-Appengine-Cron header on the scheduled jobs,
+   * and like that one, this exemption is pinned to a single exact path and
+   * grants nothing beyond it.
+   *
+   * Above the JSON parser, because the signature covers the raw bytes. Express
+   * reparses and re-serialises, and what comes back out is not what was
+   * signed: key order moves, whitespace goes. A route that parses first can
+   * never verify.
+   */
+  app.post(
+    "/api/webhooks/granola",
+    express.raw({ type: "*/*", limit: "1mb" }),
+    async (req, res) => {
+      const secret = process.env.GRANOLA_WEBHOOK_SECRET || "";
+      if (!secret) {
+        console.error("[granola] GRANOLA_WEBHOOK_SECRET is not set; refusing webhook.");
+        return res.status(503).json({ error: "Not configured." });
+      }
+
+      const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body || "");
+      if (!verifyGranolaSignature(req.headers as any, raw, secret)) {
+        // Deliberately terse. A rejection that explains itself explains itself
+        // to whoever is probing the endpoint.
+        console.warn("[granola] rejected a delivery with an invalid signature");
+        return res.status(401).json({ error: "Invalid signature." });
+      }
+
+      let event: any = {};
+      try {
+        event = JSON.parse(raw);
+      } catch {
+        return res.status(400).json({ error: "Malformed body." });
+      }
+
+      const noteId = String(event?.note_id || "");
+      const type = String(event?.event_type || "");
+      if (!noteId) return res.status(400).json({ error: "No note_id." });
+
+      // Granola allows fifteen seconds and retries for four days on a 5xx.
+      // Acknowledging first and working afterwards means a slow company match
+      // never turns into a duplicate delivery — and an error in our own
+      // processing is ours to fix from the logs, not something to make
+      // Granola retry for four days.
+      res.status(202).json({ received: true });
+
+      if (type !== "note.generated" && type !== "note.edited") return;
+
+      try {
+        await ingestGranolaNote(noteId, type);
+      } catch (error: any) {
+        console.error(`[granola] ${noteId}: ${error?.message || error}`);
+      }
+    },
+  );
 
   // ---- Authentication gate for every /api route defined below ----
   // Verifies the caller's Firebase ID token and applies the same access
