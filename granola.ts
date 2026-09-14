@@ -332,6 +332,13 @@ export function transcriptText(note: GranolaNote, maxChars = 60_000): string {
  * so those are not on the list and cannot be written by this path.
  */
 export const EXTRACTABLE: { field: string; label: string; ask: string }[] = [
+  // Identity and shape. These are the fields most often left blank on a record
+  // created from a sourcing row, and most often said out loud in the first two
+  // minutes of a call.
+  { field: "location", label: "Location", ask: "Where the company is based: city and state or country." },
+  { field: "slogan", label: "One-liner", ask: "A single sentence describing what the company does." },
+  { field: "founderName", label: "Founder", ask: "The founder or CEO's full name, if they identified themselves as such." },
+  { field: "entityInfo", label: "Entity", ask: "Legal entity type and where incorporated (e.g. 'Delaware C-Corp')." },
   { field: "revenue", label: "Revenue", ask: "Current revenue or ARR, with the unit as stated (e.g. '$1.2M ARR')." },
   { field: "customerCount", label: "Customers", ask: "Number of customers, clients or logos." },
   { field: "fte", label: "Headcount", ask: "Number of full-time employees." },
@@ -357,6 +364,31 @@ export interface ExtractedFact {
   quote: string;
 }
 
+export interface Extraction {
+  facts: ExtractedFact[];
+  /**
+   * What was agreed to happen next.
+   *
+   * Not gated on being blank, unlike the facts. A next step is the one thing
+   * on a company record that is *supposed* to change every time you speak to
+   * them — last month's "send the deck" is not stale information, it is wrong
+   * information — so the most recent call's answer is the one that counts.
+   */
+  nextSteps?: string;
+}
+
+/**
+ * The verticals a company may be filed under.
+ *
+ * Checked against rather than trusted: this is a union type in the CRM and a
+ * value outside it renders as an unstyled tag and breaks filtering, so the
+ * model's answer is matched to the list or dropped.
+ */
+export const VERTICALS = [
+  "Fintech", "Insurtech", "Regtech", "Healthtech", "Supply Chain", "MarTech",
+  "Ag Tech", "Business Productivity Software", "PropTech", "Cybersecurity", "Other",
+] as const;
+
 /**
  * Pulls stated facts out of a meeting, for fields the record has not got.
  *
@@ -380,21 +412,32 @@ export async function extractFacts(
   Type: any,
   note: GranolaNote,
   blankFields: string[],
-): Promise<ExtractedFact[]> {
+): Promise<Extraction> {
   const wanted = EXTRACTABLE.filter((f) => blankFields.includes(f.field));
-  if (wanted.length === 0) return [];
 
   const summary = String(note.summary_markdown || note.summary_text || "").trim();
   const transcript = transcriptText(note);
-  if (summary.length < 40 && transcript.length < 200) return [];
+  if (summary.length < 40 && transcript.length < 200) return { facts: [] };
+  // Next steps are always worth asking for, so an all-full record still makes
+  // the call. Nothing at all to ask for is the only reason to skip it.
+  if (wanted.length === 0 && summary.length < 40) return { facts: [] };
 
   const prompt = `
 Below are the notes and transcript of a call between our venture firm and a
 company we are evaluating. Read them and report ONLY facts about the company
 that were actually stated on this call.
 
-Report these fields, and no others:
-${wanted.map((f) => `- ${f.field}: ${f.ask}`).join("\n")}
+${
+  wanted.length
+    ? `Report these fields, and no others:
+${wanted.map((f) => `- ${f.field}: ${f.ask}`).join("\n")}`
+    : "Do not report any company fields; report only the next steps below."
+}
+
+Separately, report nextSteps: what was agreed would happen next, and who is
+doing it. One or two sentences, in plain language — "Send the data room link by
+Friday; they will introduce us to their lead customer." If nothing was agreed,
+leave it empty rather than inventing a follow-up.
 
 Rules, which matter more than filling fields in:
 - Report a field ONLY if it was stated on this call. An empty result is the
@@ -436,6 +479,10 @@ ${transcript || "(no transcript available)"}
               },
             },
           },
+          nextSteps: {
+            type: Type.STRING,
+            description: "What was agreed to happen next, and who does it. Empty if nothing was agreed.",
+          },
         },
       },
       // No tools. Nothing outside this prompt may reach a company record.
@@ -448,12 +495,12 @@ ${transcript || "(no transcript available)"}
       (response.text || "{}").replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim(),
     );
   } catch {
-    return [];
+    return { facts: [] };
   }
 
   const allowed = new Set(wanted.map((f) => f.field));
   const seen = new Set<string>();
-  return (Array.isArray(data.facts) ? data.facts : [])
+  const facts = (Array.isArray(data.facts) ? data.facts : [])
     .map((f: any) => ({
       field: String(f?.field || "").trim(),
       value: String(f?.value || "").trim().slice(0, 600),
@@ -468,7 +515,19 @@ ${transcript || "(no transcript available)"}
       if (seen.has(f.field)) return false;
       seen.add(f.field);
       return true;
-    });
+    })
+    .map((f: ExtractedFact) => {
+      // vertical is a union type in the CRM. A value outside it renders as an
+      // unstyled tag and drops out of every filter, so it is matched to the
+      // list or thrown away.
+      if (f.field !== "vertical") return f;
+      const hit = VERTICALS.find((v) => v.toLowerCase() === f.value.trim().toLowerCase());
+      return hit ? { ...f, value: hit } : null;
+    })
+    .filter(Boolean) as ExtractedFact[];
+
+  const nextSteps = String(data.nextSteps || "").trim().slice(0, 800);
+  return { facts, nextSteps: nextSteps || undefined };
 }
 
 /** The interaction note, built from the summary and what it filled in. */

@@ -125,15 +125,21 @@ async function startServer() {
 
     // --- read the company's own figures out of the call, for blanks only
     let facts: any[] = [];
-    const blanks = EXTRACTABLE.map((f) => f.field).filter(
-      (field) => String(company[field] || "").trim() === "",
-    );
+    let nextSteps: string | undefined;
+    const blanks = EXTRACTABLE.map((f) => f.field).filter((field) => {
+      const v = company[field];
+      // location may be a string or a place object; either counts as filled.
+      if (field === "location") return !v || (typeof v === "string" ? v.trim() === "" : !v.formatted_address);
+      return String(v || "").trim() === "";
+    });
 
-    if (blanks.length && !HARD_STOP) {
+    if (!HARD_STOP) {
       try {
         // Not a grounded call, so it draws no search quota — but it is still
         // a model call, and AI_HARD_STOP must silence every one of those.
-        facts = await extractFacts(getGeminiAI(), GEMINI_MODEL, Type, note, blanks);
+        const extraction = await extractFacts(getGeminiAI(), GEMINI_MODEL, Type, note, blanks);
+        facts = extraction.facts;
+        nextSteps = extraction.nextSteps;
       } catch (error: any) {
         // The summary is the point; the extraction is a bonus. A company must
         // still get its call logged when the extraction fails.
@@ -156,6 +162,7 @@ async function startServer() {
       granolaMeetingKey: key,
       granolaUrl: note.web_url || null,
       loggedBy: note.owner?.email || null,
+      nextSteps: nextSteps || undefined,
     };
 
     const patch: Record<string, unknown> = {
@@ -183,6 +190,36 @@ async function startServer() {
         url: note.web_url || null,
       };
     }
+    /**
+     * Next steps are the exception to the blank-only rule.
+     *
+     * Every other field holds something that was true when it was written and
+     * probably still is. A next step is different: last month's "send the
+     * deck" is not stale, it is wrong, and leaving it there tells somebody to
+     * do a thing that was done weeks ago. So the most recent call wins.
+     *
+     * A next step a person typed still wins over any call, and a call only
+     * overwrites another call's when it is genuinely the later one — which is
+     * what makes the backfill safe to run in any order.
+     */
+    if (nextSteps) {
+      const prior = (company.fieldSources || {}).nextSteps;
+      const priorAt = prior?.source === "granola" ? Date.parse(prior.at || "") : NaN;
+      const typedByAPerson = String(company.nextSteps || "").trim() !== "" && !prior;
+
+      if (!typedByAPerson && (!Number.isFinite(priorAt) || Date.parse(occurredAt) >= priorAt)) {
+        patch.nextSteps = nextSteps;
+        sources.nextSteps = {
+          source: "granola",
+          noteId,
+          quote: nextSteps,
+          meetingTitle: note.title || note.calendar_event?.title || null,
+          at: occurredAt,
+          url: note.web_url || null,
+        };
+      }
+    }
+
     if (Object.keys(sources).length) patch.fieldSources = sources;
 
     await ref.update(patch);
