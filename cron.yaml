@@ -32,31 +32,52 @@ cron:
     schedule: every monday 06:30
     timezone: America/Chicago
 
-  - description: >-
-      Check where the founders and firm contacts in our graph currently work.
-      Runs weekly and takes a slice each time rather than the whole list, so
-      the cost is bounded and predictable.
-    url: /api/cron/people-watch
-    schedule: every wednesday 06:30
-    timezone: America/Chicago
+# PAUSED 14 September 2026 — people-watch also calls Gemini: one grounded
+# search per person checked. Weekly and small, but "stop everything automated
+# that spends money" means this one too.
+#  - description: >-
+#      Check where the founders and firm contacts in our graph currently work.
+#      Runs weekly and takes a slice each time rather than the whole list, so
+#      the cost is bounded and predictable.
+#    url: /api/cron/people-watch
+#    schedule: every wednesday 06:30
+#    timezone: America/Chicago
 
-  - description: >-
-      Work through the investor repository: who works at each firm, and who
-      each firm invests alongside. Four runs rather than one, because App
-      Engine kills a request at ten minutes and each fresh window picks up
-      where the last left off. Running more often cannot cost more: the job
-      stops itself at the month's free grounding allowance, so a busier
-      schedule finishes the month's work earlier and then idles.
-    url: /api/cron/investor-research
-    schedule: every 1 hours from 01:00 to 04:00
-    timezone: America/Chicago
-
-  - description: >-
-      Fill in the profile of every firm still waiting for one — stages, check
-      size, verticals, fund details, the investment team — read from the firm's
-      own website. After the research runs, so a firm discovered tonight has a
-      profile by morning. Best-evidenced firms first, and it stops at the same
-      free allowance the research pass does.
-    url: /api/cron/enrich-firms
-    schedule: every 1 hours from 04:30 to 05:30
-    timezone: America/Chicago
+# ---------------------------------------------------------------------------
+# PAUSED 14 September 2026 — the two research jobs below are commented out.
+#
+# They are the only scheduled jobs that call Gemini, and an unmetered research
+# loop ran up a bill nobody authorised. Deploying this file with them commented
+# out DELETES them from Cloud Scheduler, which is what makes this stick:
+# pausing a job in the console is undone by the next `gcloud app deploy
+# cron.yaml`, and this is not.
+#
+# The jobs above still run and are free: the nightly backup makes no model
+# calls and is the only off-project copy of the database, so it stays on.
+# portfolio-snapshot and site-diff read pages and compare hashes; neither
+# calls a model.
+#
+# To turn research back on: uncomment the block below, redeploy cron.yaml, and
+# check the spend the next morning with
+#   npx tsx scripts/research-dry-run.ts --production
+# ---------------------------------------------------------------------------
+#  - description: >-
+#      Work through the investor repository: who works at each firm, and who
+#      each firm invests alongside. Four runs rather than one, because App
+#      Engine kills a request at ten minutes and each fresh window picks up
+#      where the last left off. Running more often cannot cost more: the job
+#      stops itself at the month's free grounding allowance, so a busier
+#      schedule finishes the month's work earlier and then idles.
+#    url: /api/cron/investor-research
+#    schedule: every 1 hours from 01:00 to 04:00
+#    timezone: America/Chicago
+#
+#  - description: >-
+#      Fill in the profile of every firm still waiting for one — stages, check
+#      size, verticals, fund details, the investment team — read from the firm's
+#      own website. After the research runs, so a firm discovered tonight has a
+#      profile by morning. Best-evidenced firms first, and it stops at the same
+#      free allowance the research pass does.
+#    url: /api/cron/enrich-firms
+#    schedule: every 1 hours from 04:30 to 05:30
+#    timezone: America/Chicago
