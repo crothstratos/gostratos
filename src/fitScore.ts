@@ -380,6 +380,54 @@ export function scoreInvestor(
   return finish(reasons, sectorWeightFor(sectorKind));
 }
 
+/**
+ * The fit to show for a company on the board.
+ *
+ * Prefers the score stored when it arrived from Sourcing. That one knew how
+ * many of our investors had backed the company — fifteen points that a Company
+ * record has nowhere to keep — so it is the better answer and it is the one
+ * the person saw when they moved it.
+ *
+ * Falls back to scoring the company's own text, so a company somebody typed in
+ * by hand still gets a verdict. That score cannot earn the network points and
+ * will read a little lower; it is marked as coming from the company record
+ * rather than from sourcing so the difference is visible rather than silent.
+ *
+ * Returns null when there is nothing to judge. The board shows no dot at all
+ * in that case, because an unassessed company and a poor one must not look
+ * alike on a board being used to decide what to drop.
+ */
+export function companyFit(company: Company, m: Mandate = MANDATE): FitScore | null {
+  const stored = (company as any).fitScore as
+    | { score: number; coverage: number; reasons: ScoreReason[] }
+    | undefined;
+  if (stored && typeof stored.score === 'number') {
+    return {
+      score: stored.score,
+      coverage: typeof stored.coverage === 'number' ? stored.coverage : 1,
+      reasons: Array.isArray(stored.reasons) ? stored.reasons : [],
+    };
+  }
+
+  const fit = scoreCompany(
+    {
+      name: company.name,
+      // Everything a person might have written about what the company does.
+      description: [company.slogan, company.basics, company.marketProblem, company.companySolution]
+        .filter(Boolean)
+        .join(' . '),
+      vertical: company.vertical,
+      lastRound: company.pastFinancing,
+      revenue: company.revenue,
+      // No sourceFirms on a Company, so the network component scores zero and
+      // is reported as unassessed rather than as "nobody backed it".
+      backerCount: 0,
+    },
+    m,
+  );
+  return fit.coverage < 0.35 ? null : fit;
+}
+
 /** The company-name index the investor score matches against. */
 export function ourCompanyNameSet(companies: Company[]): Set<string> {
   const set = new Set<string>();
@@ -393,6 +441,51 @@ export function ourCompanyNameSet(companies: Company[]): Set<string> {
 // ───────────────────────────────────────────────────────────────────────────
 // Presentation
 // ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Three verdicts, for the pipeline.
+ *
+ * The five-band scale is right in Sourcing, where the job is to rank several
+ * hundred companies against each other. It is wrong on a pipeline card, where
+ * the job is a decision with three answers: keep it in Initial Review, reach
+ * out and find out more, or move it to Watchlist or Passed.
+ *
+ * So the same number drives both, read at different resolutions. The
+ * boundaries are the existing band edges rather than new ones, which is what
+ * keeps a company that read as a "Good fit" in Sourcing from arriving in the
+ * pipeline as an amber.
+ */
+export type Verdict = 'keep' | 'reach-out' | 'pass';
+
+export function verdictFor(score: number): Verdict {
+  if (score >= 65) return 'keep';        // 'good' and 'strong'
+  if (score >= 45) return 'reach-out';   // 'fair'
+  return 'pass';                          // 'weak' and 'poor'
+}
+
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  'keep': 'Good fit — worth keeping in Initial Review',
+  'reach-out': 'Worth reaching out to find out more',
+  'pass': 'Below the bar — consider Watchlist or Passed',
+};
+
+/**
+ * One colour per verdict, in each theme.
+ *
+ * Taken from the dial's own ramp rather than picked fresh, so a company does
+ * not change colour on the way from Sourcing to the pipeline. Read at 15, 55
+ * and 88 — inside the red, amber and green thirds rather than at their edges,
+ * so each dot is unambiguously its own colour.
+ *
+ * A function, not a constant object. colorFor is a const arrow function
+ * declared below this point, so an object literal calling it here would run
+ * during module evaluation and hit the temporal dead zone — a ReferenceError
+ * at import time, which takes the whole app down rather than one card.
+ */
+export function verdictColor(v: Verdict): { light: string; dark: string } {
+  const at = v === 'keep' ? 88 : v === 'reach-out' ? 55 : 15;
+  return { light: colorFor(at), dark: colorForDark(at) };
+}
 
 export type Band = 'strong' | 'good' | 'fair' | 'weak' | 'poor';
 

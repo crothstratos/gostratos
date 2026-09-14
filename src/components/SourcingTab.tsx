@@ -7,7 +7,7 @@ import { Company, InvestorRepositoryEntry, SourcingCandidate, Stage } from '../t
 import { useSourcing } from '../hooks/useSourcing';
 import { useInvestors } from '../hooks/useInvestors';
 import { cn } from '../utils';
-import { scoreSourcingCandidate } from '../fitScore';
+import { scoreSourcingCandidate, FitScore } from '../fitScore';
 import { FitDial } from './FitDial';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -86,8 +86,15 @@ export function SourcingTab({
   const activeCount = candidates.filter(c => c.status !== 'dismissed').length;
   const dismissedCount = candidates.filter(c => c.status === 'dismissed').length;
 
-  /** Creates the company in Initial Review and drops the sourcing row. */
-  const moveToReview = async (c: SourcingCandidate) => {
+  /**
+   * Creates the company in Initial Review and drops the sourcing row.
+   *
+   * The fit score comes in as an argument rather than being recomputed here.
+   * It is the score the card was showing when the button was pressed, and a
+   * number that changes as it crosses between two tabs is a number nobody
+   * believes — see StoredFitScore for why recomputing gives a different answer.
+   */
+  const moveToReview = async (c: SourcingCandidate, fit: FitScore) => {
     setMovingId(c.id);
     try {
       const now = new Date().toISOString();
@@ -119,6 +126,13 @@ export function SourcingTab({
         pastFinancing: c.lastRound || '',
         lastModified: now,
         stageHistory: [{ stage: 'Initial Review', date: now } as any],
+        fitScore: {
+          score: fit.score,
+          coverage: fit.coverage,
+          reasons: fit.reasons,
+          scoredAt: now,
+          source: 'sourcing',
+        },
       } as Company;
 
       await onAddCompany(company);
@@ -394,7 +408,7 @@ export function SourcingTab({
                       <>
                         <button
                           type="button"
-                          onClick={() => moveToReview(c)}
+                          onClick={() => moveToReview(c, fit)}
                           disabled={isMoving}
                           className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
                         >

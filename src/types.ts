@@ -474,6 +474,31 @@ export interface CompanyVersion {
   data: any; // We'll just store the modified fields here
 }
 
+/**
+ * A fit score carried onto a company record.
+ *
+ * Stored rather than recomputed, and that is the whole point of it. A sourcing
+ * row and a company record are different shapes: the row knows how many of our
+ * investors backed the company, which is fifteen of the hundred points and has
+ * nowhere to live on a Company. Recomputing after the move would quietly drop
+ * that and a company could arrive in Initial Review several points worse than
+ * it looked in Sourcing, for no reason anybody could see.
+ *
+ * So the score travels with the company, stamped with when it was taken and
+ * what it was taken from.
+ */
+export interface StoredFitScore {
+  /** 0-100, as it stood when the company was moved. */
+  score: number;
+  /** How much of the rubric had evidence, 0-1. Below ~0.35 shows no dot. */
+  coverage: number;
+  /** The component breakdown, so the tooltip can still explain the number. */
+  reasons: { label: string; points: number; max: number; detail: string; assessed: boolean }[];
+  scoredAt: string;
+  /** Where it came from. 'sourcing' means it was carried over on the move. */
+  source: 'sourcing' | 'company';
+}
+
 export interface Company {
   versions?: CompanyVersion[];
   activeVersionId?: string;
@@ -485,6 +510,16 @@ export interface Company {
   vertical?: Vertical;
   source?: string;
   externalSource?: string;
+  /**
+   * How well this company fits the mandate, as scored when it arrived.
+   *
+   * Absent on companies added before scoring existed, and on any added by hand
+   * with too little written down to judge. Absent means no dot is shown —
+   * never a red one, because "not assessed" and "poor fit" must not look the
+   * same on a board somebody is using to decide what to drop.
+   */
+  fitScore?: StoredFitScore;
+
   /** Structured referrers. See the Referrer type. */
   referrers?: Referrer[];
   /**

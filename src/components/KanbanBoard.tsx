@@ -8,6 +8,8 @@ import { Download, FileText, FileSpreadsheet, MapPin, Globe, MessageSquare, Spar
 
 import { MapModal } from './MapModal';
 import { useGemini } from '../hooks/useGemini';
+import { companyFit } from '../fitScore';
+import { FitDot } from './FitDot';
 
 interface KanbanBoardProps {
   companies: Company[];
@@ -48,6 +50,21 @@ const CardBody = React.memo(function CardBody({
   dragging?: boolean;
 }) {
   const lastInteraction = company.interactions && company.interactions.length > 0 ? company.interactions[0] : null;
+
+  /**
+   * Memoised on the fields it reads, not on the company object.
+   *
+   * The board re-renders on every Firestore snapshot and every drag frame, and
+   * this runs once per card. It is only string matching, but doing it a few
+   * hundred times per frame during a drag is still worth not doing.
+   */
+  const fit = React.useMemo(
+    () => companyFit(company),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [company.fitScore, company.name, company.slogan, company.basics,
+     company.marketProblem, company.companySolution, company.vertical,
+     company.pastFinancing, company.revenue]
+  );
 
   const move = (e: React.MouseEvent, stage: Stage) => {
     e.stopPropagation();
@@ -134,6 +151,11 @@ const CardBody = React.memo(function CardBody({
             {relativeAge(lastInteraction.date)}
           </span>
         )}
+        {/*
+          Bottom right, after the age. ml-auto only when there is no age
+          already claiming it, so the two never fight over the same edge.
+        */}
+        {fit && <FitDot fit={fit} className={lastInteraction ? 'ml-1' : 'ml-auto'} />}
       </div>
 
       {menuOpen && (
