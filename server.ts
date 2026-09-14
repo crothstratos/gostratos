@@ -214,9 +214,26 @@ async function startServer() {
     express.raw({ type: "*/*", limit: "1mb" }),
     async (req, res) => {
       const secret = process.env.GRANOLA_WEBHOOK_SECRET || "";
+
+      /**
+       * No secret yet: answer, but do nothing.
+       *
+       * Granola probes this URL before it will hand over a signing secret, and
+       * the secret is what this endpoint needs in order to trust anything —
+       * so refusing the probe until the secret exists makes registration
+       * impossible. An earlier version returned 503 here and did exactly that.
+       *
+       * Answering 200 costs nothing: no payload is read, no note is fetched,
+       * nothing is written. It says only "this URL exists", which is the one
+       * question the probe is asking. The moment the secret is configured,
+       * every delivery has to carry a valid signature again.
+       */
       if (!secret) {
-        console.error("[granola] GRANOLA_WEBHOOK_SECRET is not set; refusing webhook.");
-        return res.status(503).json({ error: "Not configured." });
+        console.warn(
+          "[granola] a delivery arrived but GRANOLA_WEBHOOK_SECRET is not set. " +
+            "Acknowledged and ignored. Set the secret in env.yaml and redeploy.",
+        );
+        return res.status(200).json({ status: "awaiting-configuration" });
       }
 
       const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body || "");
