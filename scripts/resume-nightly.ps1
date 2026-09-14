@@ -1,122 +1,119 @@
 <#
-    Starts the scheduled jobs again.
+    Starts scheduled jobs again.
 
-    By default it resumes only the jobs that cost nothing to run — the nightly
-    backup, the monthly portfolio snapshot, and the weekly website diff. The
-    jobs that call Gemini stay paused unless you ask for them by name, because
-    those are the ones that ran up a bill and turning them all back on with one
-    command is how that happens twice.
+    By default it resumes only the jobs that cost nothing — the nightly backup,
+    the monthly portfolio snapshot, the weekly website diff. The jobs that call
+    Gemini stay paused unless you name one, because those are what ran up a
+    bill and restoring everything with one keystroke is how that happens twice.
 
-        .\scripts\resume-nightly.ps1                 resume the free jobs
-        .\scripts\resume-nightly.ps1 -All            resume everything, including AI
-        .\scripts\resume-nightly.ps1 -Job backup     resume one job by name fragment
+        .\scripts\resume-nightly.ps1                      resume the free jobs
+        .\scripts\resume-nightly.ps1 -List                show state, change nothing
+        .\scripts\resume-nightly.ps1 -Job investor        resume one by name
+        .\scripts\resume-nightly.ps1 -All                 resume everything
 #>
 
 param(
     [switch]$All,
+    [switch]$List,
     [string]$Job,
     [string]$Project = "gen-lang-client-0128987745"
 )
 
-$ErrorActionPreference = "Stop"
+# See the note in pause-nightly.ps1: gcloud writes advisories to stderr, and
+# under "Stop" PowerShell treats those as fatal. Failure is $LASTEXITCODE.
+$ErrorActionPreference = "Continue"
 
-function Test-GcloudAuth {
-    param([string[]]$Output)
-    $text = ($Output -join "`n")
-    # gcloud cannot show its reauth prompt when its output is being captured,
-    # so an expired CLI login surfaces here as "cannot prompt during
-    # non-interactive execution" rather than as anything about logging in.
-    if ($text -match "Reauthentication failed" -or
-        $text -match "cannot prompt during non-interactive" -or
-        $text -match "credentials are no longer valid" -or
-        $text -match "You do not currently have an active account" -or
-        $text -match "invalid_grant" -or
-        $text -match "Your current credentials are invalid") {
+# Jobs that make no model calls. Matched on a fragment, because App Engine
+# derives Scheduler ids from the cron URL and prefixes them.
+$FREE = @("firestore-export", "portfolio-snapshot", "site-diff")
 
+function Show-AuthHelp {
+    param([string]$Text)
+    if ($Text -match "Reauthentication failed|cannot prompt during non-interactive|credentials are no longer valid|do not currently have an active account|invalid_grant") {
         Write-Host ""
         Write-Host "  Your gcloud sign-in has expired." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "  Run this, then try again:" -ForegroundColor Yellow
-        Write-Host ""
         Write-Host "      gcloud auth login" -ForegroundColor White
         Write-Host ""
-        Write-Host "  Note: this is NOT the same as 'gcloud auth application-default login'."
-        Write-Host "  That one signs in local scripts that read Firestore. This one signs in"
-        Write-Host "  the gcloud command itself, which is what this script uses."
-        Write-Host ""
-        Write-Host "  No terminal handy? Pause the jobs in the console instead:" -ForegroundColor Cyan
-        Write-Host "  https://console.cloud.google.com/cloudscheduler"
+        Write-Host "  Or use the console: https://console.cloud.google.com/cloudscheduler?project=$Project" -ForegroundColor Cyan
         Write-Host ""
         return $true
     }
     return $false
 }
 
-# Jobs that make no model calls. Matched on a fragment of the job id, because
-# App Engine derives those ids from the cron URL and they carry a prefix.
-$FREE = @("firestore-export", "portfolio-snapshot", "site-diff")
-
 Write-Host ""
 Write-Host "Project: $Project" -ForegroundColor Cyan
 
-$raw = gcloud scheduler jobs list --project=$Project --format="value(name,state)" 2>&1
+$errFile = [System.IO.Path]::GetTempFileName()
+$json = & gcloud scheduler jobs list --project=$Project --format=json 2>$errFile
+$stderr = (Get-Content $errFile -Raw -ErrorAction SilentlyContinue)
+Remove-Item $errFile -ErrorAction SilentlyContinue
+
 if ($LASTEXITCODE -ne 0) {
-    if (Test-GcloudAuth $raw) { exit 1 }
+    if (Show-AuthHelp $stderr) { exit 1 }
     Write-Host "Could not list scheduled jobs." -ForegroundColor Red
-    Write-Host $raw
+    Write-Host $stderr
     exit 1
 }
 
+try { $all = ($json | Out-String | ConvertFrom-Json) } catch { $all = @() }
+if ($null -eq $all) { $all = @() }
+
 $jobs = @()
-foreach ($line in $raw) {
-    if ([string]::IsNullOrWhiteSpace($line)) { continue }
-    $parts = $line -split "\s+"
-    if ($parts[0] -match "projects/[^/]+/locations/([^/]+)/jobs/(.+)$") {
-        $jobs += [PSCustomObject]@{
-            Id       = $Matches[2]
-            Location = $Matches[1]
-            State    = if ($parts.Length -gt 1) { $parts[1] } else { "UNKNOWN" }
-        }
+foreach ($j in $all) {
+    if ($j.name -match "projects/[^/]+/locations/([^/]+)/jobs/(.+)$") {
+        $jobs += [PSCustomObject]@{ Id = $Matches[2]; Location = $Matches[1]; State = $j.state }
     }
 }
 
 if ($jobs.Count -eq 0) {
     Write-Host "No scheduled jobs found." -ForegroundColor Yellow
+    Write-Host ""
     exit 0
 }
 
-$wanted = $jobs | Where-Object {
-    if ($Job)  { return $_.Id -like "*$Job*" }
-    if ($All)  { return $true }
-    foreach ($f in $FREE) { if ($_.Id -like "*$f*") { return $true } }
-    return $false
+Write-Host ""
+Write-Host ("{0,-36} {1}" -f "JOB", "STATE")
+Write-Host ("-" * 56)
+foreach ($j in $jobs) {
+    $colour = if ($j.State -eq "PAUSED") { "DarkGray" } else { "White" }
+    Write-Host ("{0,-36} {1}" -f $j.Id, $j.State) -ForegroundColor $colour
+}
+Write-Host ""
+
+if ($List) { exit 0 }
+
+$wanted = @()
+foreach ($j in $jobs) {
+    if ($Job) { if ($j.Id -like "*$Job*") { $wanted += $j }; continue }
+    if ($All) { $wanted += $j; continue }
+    foreach ($f in $FREE) { if ($j.Id -like "*$f*") { $wanted += $j; break } }
 }
 
-$skipped = $jobs | Where-Object { $wanted -notcontains $_ }
-
-Write-Host ""
 if ($wanted.Count -eq 0) {
-    Write-Host "Nothing matched. Jobs available:" -ForegroundColor Yellow
-    foreach ($j in $jobs) { Write-Host ("  {0}  [{1}]" -f $j.Id, $j.State) }
+    Write-Host "Nothing matched." -ForegroundColor Yellow
+    Write-Host ""
     exit 0
 }
 
 foreach ($j in $wanted) {
-    Write-Host ("  {0,-34} " -f $j.Id) -NoNewline
-    if ($j.State -ne "PAUSED") {
-        Write-Host "already running" -ForegroundColor DarkGray
-        continue
-    }
-    gcloud scheduler jobs resume $j.Id --location=$j.Location --project=$Project --quiet 2>&1 | Out-Null
+    Write-Host ("  {0,-36} " -f $j.Id) -NoNewline
+    if ($j.State -ne "PAUSED") { Write-Host "already running" -ForegroundColor DarkGray; continue }
+    $e = [System.IO.Path]::GetTempFileName()
+    & gcloud scheduler jobs resume $j.Id --location=$j.Location --project=$Project --quiet 1>$null 2>$e
+    $msg = (Get-Content $e -Raw -ErrorAction SilentlyContinue)
+    Remove-Item $e -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -eq 0) { Write-Host "resumed" -ForegroundColor Green }
-    else { Write-Host "FAILED" -ForegroundColor Red }
+    else { Write-Host "FAILED" -ForegroundColor Red; Show-AuthHelp $msg | Out-Null }
 }
 
-if ($skipped.Count -gt 0) {
+$stillPaused = $jobs | Where-Object { $wanted -notcontains $_ }
+if ($stillPaused.Count -gt 0) {
     Write-Host ""
-    Write-Host "Left paused (these call Gemini):" -ForegroundColor Yellow
-    foreach ($j in $skipped) { Write-Host ("  {0}  [{1}]" -f $j.Id, $j.State) }
+    Write-Host "Left alone (these call Gemini):" -ForegroundColor Yellow
+    foreach ($j in $stillPaused) { Write-Host ("  {0}" -f $j.Id) }
     Write-Host ""
-    Write-Host "Turn one on deliberately with:  .\scripts\resume-nightly.ps1 -Job <name>"
+    Write-Host "Turn one on deliberately:  .\scripts\resume-nightly.ps1 -Job <name>"
 }
 Write-Host ""

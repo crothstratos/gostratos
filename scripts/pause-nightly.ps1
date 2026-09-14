@@ -2,53 +2,56 @@
     Pauses every scheduled job in the project, immediately.
 
     Use this when something is spending money and you want it to stop now,
-    without deciding which job is responsible. Pausing takes effect at once —
-    there is no deploy, no build, and nothing to wait for.
+    without first working out which job is responsible. Pausing takes effect at
+    once — no build, no deploy, nothing to wait for.
 
-    What pausing does NOT survive: `gcloud app deploy cron.yaml` recreates
-    every job in that file in the running state. If you want a job to stay off
-    permanently, take it out of cron.yaml. This script is the emergency brake,
-    not the setting.
+        .\scripts\pause-nightly.ps1                 pause everything
+        .\scripts\pause-nightly.ps1 -List           show what exists, change nothing
+        .\scripts\pause-nightly.ps1 -Keep backup    pause all but the backup
 
-        .\scripts\pause-nightly.ps1            pause everything
-        .\scripts\pause-nightly.ps1 -List      just show what exists
+    What pausing does NOT survive: `gcloud app deploy cron.yaml` recreates every
+    job listed in that file, running. If you want a job off permanently, take it
+    out of cron.yaml. This is the emergency brake, not the setting.
 
     Reverse it with scripts\resume-nightly.ps1.
 #>
 
 param(
     [switch]$List,
+    [string]$Keep = "firestore-export",
     [string]$Project = "gen-lang-client-0128987745"
 )
 
-$ErrorActionPreference = "Stop"
+<#
+    Deliberately NOT "Stop".
 
-function Test-GcloudAuth {
-    param([string[]]$Output)
-    $text = ($Output -join "`n")
-    # gcloud cannot show its reauth prompt when its output is being captured,
-    # so an expired CLI login surfaces here as "cannot prompt during
-    # non-interactive execution" rather than as anything about logging in.
-    if ($text -match "Reauthentication failed" -or
-        $text -match "cannot prompt during non-interactive" -or
-        $text -match "credentials are no longer valid" -or
-        $text -match "You do not currently have an active account" -or
-        $text -match "invalid_grant" -or
-        $text -match "Your current credentials are invalid") {
+    gcloud writes progress and advisory notes to stderr — "We are using the App
+    Engine app location (us-central1) as the default location" is a warning,
+    not a failure. Under ErrorActionPreference = Stop, PowerShell turns any
+    stderr line from a native command into a terminating NativeCommandError, so
+    the script died on a message that was telling it things were fine.
 
+    Native commands report failure through $LASTEXITCODE, and that is what is
+    checked below.
+#>
+$ErrorActionPreference = "Continue"
+
+function Show-AuthHelp {
+    param([string]$Text)
+    # gcloud cannot show its reauth prompt when output is captured, so an
+    # expired sign-in arrives as "cannot prompt during non-interactive
+    # execution" rather than as anything about signing in.
+    if ($Text -match "Reauthentication failed|cannot prompt during non-interactive|credentials are no longer valid|do not currently have an active account|invalid_grant") {
         Write-Host ""
         Write-Host "  Your gcloud sign-in has expired." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "  Run this, then try again:" -ForegroundColor Yellow
-        Write-Host ""
         Write-Host "      gcloud auth login" -ForegroundColor White
         Write-Host ""
-        Write-Host "  Note: this is NOT the same as 'gcloud auth application-default login'."
-        Write-Host "  That one signs in local scripts that read Firestore. This one signs in"
-        Write-Host "  the gcloud command itself, which is what this script uses."
+        Write-Host "  Not the same as 'gcloud auth application-default login' — that one"
+        Write-Host "  signs in local scripts that read Firestore; this one signs in gcloud."
         Write-Host ""
-        Write-Host "  No terminal handy? Pause the jobs in the console instead:" -ForegroundColor Cyan
-        Write-Host "  https://console.cloud.google.com/cloudscheduler"
+        Write-Host "  Or pause the jobs in the console, which needs no terminal:" -ForegroundColor Cyan
+        Write-Host "  https://console.cloud.google.com/cloudscheduler?project=$Project"
         Write-Host ""
         return $true
     }
@@ -59,83 +62,102 @@ Write-Host ""
 Write-Host "Project: $Project" -ForegroundColor Cyan
 Write-Host ""
 
-# name comes back as projects/<p>/locations/<loc>/jobs/<id>; the location is
-# needed for every later call and is only available here.
-$raw = gcloud scheduler jobs list --project=$Project --format="value(name,state)" 2>&1
+# JSON rather than text, and stderr sent to its own file, so advisory warnings
+# cannot end up parsed as though they were rows.
+$errFile = [System.IO.Path]::GetTempFileName()
+$json = & gcloud scheduler jobs list --project=$Project --format=json 2>$errFile
+$stderr = (Get-Content $errFile -Raw -ErrorAction SilentlyContinue)
+Remove-Item $errFile -ErrorAction SilentlyContinue
 
 if ($LASTEXITCODE -ne 0) {
-    if (Test-GcloudAuth $raw) { exit 1 }
+    if (Show-AuthHelp $stderr) { exit 1 }
     Write-Host "Could not list scheduled jobs." -ForegroundColor Red
-    Write-Host $raw
+    Write-Host $stderr
     exit 1
 }
 
+try { $all = ($json | Out-String | ConvertFrom-Json) } catch { $all = @() }
+if ($null -eq $all) { $all = @() }
+
 $jobs = @()
-foreach ($line in $raw) {
-    if ([string]::IsNullOrWhiteSpace($line)) { continue }
-    $parts = $line -split "\s+"
-    $path  = $parts[0]
-    $state = if ($parts.Length -gt 1) { $parts[1] } else { "UNKNOWN" }
-    if ($path -match "projects/[^/]+/locations/([^/]+)/jobs/(.+)$") {
+foreach ($j in $all) {
+    if ($j.name -match "projects/[^/]+/locations/([^/]+)/jobs/(.+)$") {
         $jobs += [PSCustomObject]@{
             Id       = $Matches[2]
             Location = $Matches[1]
-            State    = $state
+            State    = $j.state
         }
     }
 }
 
 if ($jobs.Count -eq 0) {
-    Write-Host "No scheduled jobs found. Nothing is running on a schedule." -ForegroundColor Green
+    Write-Host "No scheduled jobs found. Nothing runs on a schedule." -ForegroundColor Green
     Write-Host ""
     exit 0
 }
 
-Write-Host ("{0,-34} {1,-16} {2}" -f "JOB", "LOCATION", "STATE")
-Write-Host ("-" * 68)
+Write-Host ("{0,-36} {1,-14} {2}" -f "JOB", "LOCATION", "STATE")
+Write-Host ("-" * 70)
 foreach ($j in $jobs) {
     $colour = if ($j.State -eq "PAUSED") { "DarkGray" } else { "White" }
-    Write-Host ("{0,-34} {1,-16} {2}" -f $j.Id, $j.Location, $j.State) -ForegroundColor $colour
+    Write-Host ("{0,-36} {1,-14} {2}" -f $j.Id, $j.Location, $j.State) -ForegroundColor $colour
 }
 Write-Host ""
 
 if ($List) { exit 0 }
 
-$running = $jobs | Where-Object { $_.State -ne "PAUSED" }
-if ($running.Count -eq 0) {
-    Write-Host "Everything is already paused." -ForegroundColor Green
+# The backup is kept running by default. "Stop the automation" and "stop the
+# backups" are different instructions and only one of them is usually meant.
+$target = $jobs | Where-Object { $_.State -ne "PAUSED" -and ($Keep -eq "" -or $_.Id -notlike "*$Keep*") }
+$kept   = $jobs | Where-Object { $Keep -ne "" -and $_.Id -like "*$Keep*" }
+
+if ($target.Count -eq 0) {
+    Write-Host "Nothing left to pause." -ForegroundColor Green
+    if ($kept.Count -gt 0) {
+        Write-Host ""
+        foreach ($j in $kept) { Write-Host ("  still running on purpose: {0}" -f $j.Id) -ForegroundColor Cyan }
+    }
     Write-Host ""
     exit 0
 }
 
-Write-Host "Pausing $($running.Count) job(s)..." -ForegroundColor Yellow
+Write-Host "Pausing $($target.Count) job(s)..." -ForegroundColor Yellow
 Write-Host ""
 
 $failed = 0
-$script:explained = $false
-foreach ($j in $running) {
-    Write-Host ("  {0,-34} " -f $j.Id) -NoNewline
-    $out = gcloud scheduler jobs pause $j.Id --location=$j.Location --project=$Project --quiet 2>&1
+$explained = $false
+foreach ($j in $target) {
+    Write-Host ("  {0,-36} " -f $j.Id) -NoNewline
+    $e = [System.IO.Path]::GetTempFileName()
+    & gcloud scheduler jobs pause $j.Id --location=$j.Location --project=$Project --quiet 1>$null 2>$e
+    $msg = (Get-Content $e -Raw -ErrorAction SilentlyContinue)
+    Remove-Item $e -ErrorAction SilentlyContinue
+
     if ($LASTEXITCODE -eq 0) {
         Write-Host "paused" -ForegroundColor Green
     } else {
         Write-Host "FAILED" -ForegroundColor Red
         $failed++
-        # Checked once. A sign-in that lapsed mid-run fails every remaining
-        # job for the same reason, and printing it once is the useful amount.
-        if (-not $script:explained -and (Test-GcloudAuth $out)) { $script:explained = $true }
+        # Once, not once per job: a sign-in that lapsed mid-run fails every
+        # remaining job for the same reason.
+        if (-not $explained) { $explained = Show-AuthHelp $msg }
     }
 }
 
 Write-Host ""
+foreach ($j in $kept) {
+    Write-Host ("  left running on purpose: {0}" -f $j.Id) -ForegroundColor Cyan
+}
+
+Write-Host ""
 if ($failed -gt 0) {
-    Write-Host "$failed job(s) could not be paused. Pause them by hand at:" -ForegroundColor Red
+    Write-Host "$failed job(s) could not be paused. Pause them by hand:" -ForegroundColor Red
     Write-Host "  https://console.cloud.google.com/cloudscheduler?project=$Project"
     exit 1
 }
 
-Write-Host "All scheduled jobs are paused. Nothing will run tonight." -ForegroundColor Green
+Write-Host "Done. Nothing on a schedule will spend money tonight." -ForegroundColor Green
 Write-Host ""
-Write-Host "Remember: deploying cron.yaml will start them again." -ForegroundColor Yellow
-Write-Host "Resume deliberately with: .\scripts\resume-nightly.ps1"
+Write-Host "Note: deploying cron.yaml starts these again." -ForegroundColor Yellow
+Write-Host "The permanent stop is the commented-out jobs in cron.yaml."
 Write-Host ""
