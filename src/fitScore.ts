@@ -1,5 +1,5 @@
 import { MANDATE, Mandate } from './mandate';
-import { parseMoney } from './money';
+import { parseMoney, parseCheckSize } from './money';
 import { normaliseCompanyName } from './companyMatch';
 import type { Company, InvestorRepositoryEntry, SourcingCandidate } from './types';
 
@@ -365,16 +365,28 @@ export function scoreInvestor(
   //
   // A fund writing $25M cheques is not a co-investor at seed however well the
   // sectors line up, and one writing $25K is an angel. The window is generous
-  // because check size is reported loosely and is often a range.
-  const check = parseMoney(firm.checkSize);
-  if (check === null) {
+  // because check size is reported loosely and is usually a range.
+  //
+  // parseCheckSize, not parseMoney. This read parseMoney until today, which
+  // takes a bare number as dollars — correct for a revenue field and wrong
+  // here, because "1-5" in a check-size box means one to five million. Every
+  // firm whose check size was written without units scored 3 out of 10 for
+  // "cheque size far from ours" while writing exactly our size of cheque.
+  //
+  // A range is scored on its overlap with ours rather than on one end, so a
+  // firm writing $500K-$5M counts as a match on the strength of the part that
+  // fits, not the part that does not.
+  const range = parseCheckSize(firm.checkSize);
+  const OUR_MIN = 250_000;
+  const OUR_MAX = 10_000_000;
+  if (range === null) {
     reasons.push({ label: 'Check size', points: 0, max: 10, assessed: false, detail: 'No check size recorded' });
-  } else if (check >= 250_000 && check <= 10_000_000) {
+  } else if (range.max >= OUR_MIN && range.min <= OUR_MAX) {
     reasons.push({ label: 'Check size', points: 10, max: 10, assessed: true, detail: 'Writes cheques the size of ours' });
-  } else if (check >= 50_000 && check < 250_000) {
+  } else if (range.max < OUR_MIN) {
     reasons.push({ label: 'Check size', points: 5, max: 10, assessed: true, detail: 'Smaller cheques than ours' });
   } else {
-    reasons.push({ label: 'Check size', points: 3, max: 10, assessed: true, detail: 'Cheque size far from ours' });
+    reasons.push({ label: 'Check size', points: 3, max: 10, assessed: true, detail: 'Writes much larger cheques than ours' });
   }
 
   return finish(reasons, sectorWeightFor(sectorKind));

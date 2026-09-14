@@ -1,3 +1,4 @@
+import { parseCheckSize } from '../money';
 import { useMemo } from 'react';
 import { Company, InvestorRepositoryEntry } from '../types';
 import { isSameCompany } from '../companyMatch';
@@ -28,33 +29,6 @@ const asList = (v: string | string[] | undefined): string[] => {
   return String(v).split(/[,/|;]+/).map(x => x.toLowerCase().trim()).filter(Boolean);
 };
 
-/**
- * Pulls a dollar range out of free text like "$500K–$2M" or "1-5 million".
- * Returns null when nothing parseable is there, which is common and fine.
- */
-export function parseCheckSize(raw: string | undefined): { min: number; max: number } | null {
-  if (!raw) return null;
-  const text = String(raw).toLowerCase().replace(/,/g, '');
-  const matches = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(k|m|mm|b|thousand|million|billion)?/g)];
-  const values: number[] = [];
-
-  for (const m of matches) {
-    const n = parseFloat(m[1]);
-    if (!Number.isFinite(n)) continue;
-    const unit = m[2] || '';
-    let scale = 1;
-    if (unit === 'k' || unit === 'thousand') scale = 1e3;
-    else if (unit === 'm' || unit === 'mm' || unit === 'million') scale = 1e6;
-    else if (unit === 'b' || unit === 'billion') scale = 1e9;
-    // A bare number in a check-size field means millions far more often than
-    // dollars: "1-5" is 1 to 5 million, not one dollar to five.
-    else if (n < 1000) scale = 1e6;
-    values.push(n * scale);
-  }
-
-  if (values.length === 0) return null;
-  return { min: Math.min(...values), max: Math.max(...values) };
-}
 
 /** Normalises the many spellings of a funding round to a comparable token. */
 export function normaliseStage(raw: string): string[] {
@@ -195,3 +169,8 @@ export function useStaleInvestors(
     });
   }, [firms, thresholdDays]);
 }
+
+// Re-exported so the many importers of this module keep working. The
+// implementation lives in money.ts, next to parseMoney, because two money
+// parsers in different files is how they came to disagree.
+export { parseCheckSize };

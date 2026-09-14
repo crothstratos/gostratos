@@ -50,3 +50,49 @@ export function formatRunway(months: number): string {
   if (months < 24) return `${months.toFixed(months < 10 ? 1 : 0)} months`;
   return `${(months / 12).toFixed(1)} years`;
 }
+
+/**
+ * A check size, where a bare number means millions.
+ *
+ * The opposite convention to parseMoney above, and deliberately so. These are
+ * two different questions about two different fields:
+ *
+ *   Company.revenue  "5"  is five dollars. Reading it as five million would
+ *                         put a made-up figure in front of an investor.
+ *   checkSize        "5"  is five million. Nobody writes a five-dollar cheque,
+ *                         and "1-5" in a check-size field means 1 to 5 million
+ *                         every time.
+ *
+ * They lived in separate files and drifted into a real bug: scoreInvestor
+ * called parseMoney on checkSize, read "1-5" as one dollar, and scored a firm
+ * writing exactly our size of cheque as "cheque size far from ours" — 3 points
+ * out of 10 instead of 10. Both now live here, next to each other, where the
+ * difference is visible and has to be chosen rather than stumbled into.
+ */
+/**
+ * Pulls a dollar range out of free text like "$500K–$2M" or "1-5 million".
+ * Returns null when nothing parseable is there, which is common and fine.
+ */
+export function parseCheckSize(raw: string | undefined): { min: number; max: number } | null {
+  if (!raw) return null;
+  const text = String(raw).toLowerCase().replace(/,/g, '');
+  const matches = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(k|m|mm|b|thousand|million|billion)?/g)];
+  const values: number[] = [];
+
+  for (const m of matches) {
+    const n = parseFloat(m[1]);
+    if (!Number.isFinite(n)) continue;
+    const unit = m[2] || '';
+    let scale = 1;
+    if (unit === 'k' || unit === 'thousand') scale = 1e3;
+    else if (unit === 'm' || unit === 'mm' || unit === 'million') scale = 1e6;
+    else if (unit === 'b' || unit === 'billion') scale = 1e9;
+    // A bare number in a check-size field means millions far more often than
+    // dollars: "1-5" is 1 to 5 million, not one dollar to five.
+    else if (n < 1000) scale = 1e6;
+    values.push(n * scale);
+  }
+
+  if (values.length === 0) return null;
+  return { min: Math.min(...values), max: Math.max(...values) };
+}
