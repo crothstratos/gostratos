@@ -10,7 +10,7 @@
     and the script refuses to write anything it cannot verify afterwards.
 
     Running it twice is safe: a key already present is updated in place rather
-    than added a second time, and a parameter left blank is skipped entirely —
+    than added a second time, and a parameter left blank is skipped entirely --
     which is how you set the API key now and the webhook secret later.
 #>
 
@@ -61,7 +61,7 @@ $lines = @(Get-Content -Path $envPath -Encoding UTF8)
 if ($Show) { Show-Keys $lines; exit 0 }
 
 # Only the parameters actually supplied. A blank one is not an instruction to
-# blank the key — it means "not this time".
+# blank the key -- it means "not this time".
 $wanted = [ordered]@{}
 if ($GranolaApiKey)        { $wanted["GRANOLA_API_KEY"]        = $GranolaApiKey.Trim() }
 if ($GranolaWebhookSecret) { $wanted["GRANOLA_WEBHOOK_SECRET"] = $GranolaWebhookSecret.Trim() }
@@ -69,7 +69,7 @@ if ($InternalDomains)      { $wanted["GRANOLA_INTERNAL_DOMAINS"] = $InternalDoma
 
 if ($wanted.Count -eq 0) {
     Write-Host ""
-    Write-Host "  Nothing to do — no values were given." -ForegroundColor Yellow
+    Write-Host "  Nothing to do -- no values were given." -ForegroundColor Yellow
     Write-Host "  Try:  .\scripts\set-env.ps1 -GranolaApiKey ""grn_...""" -ForegroundColor Yellow
     Show-Keys $lines
     exit 0
@@ -88,14 +88,14 @@ foreach ($k in @($wanted.Keys)) {
 }
 if ($wanted.Contains("GRANOLA_API_KEY") -and -not $wanted["GRANOLA_API_KEY"].StartsWith("grn_")) {
     Write-Host ""
-    Write-Host "  That does not look like a Granola API key — they start with 'grn_'." -ForegroundColor Yellow
+    Write-Host "  That does not look like a Granola API key -- they start with 'grn_'." -ForegroundColor Yellow
     Write-Host "  Nothing was changed. Check you copied the whole key." -ForegroundColor Yellow
     Write-Host ""
     exit 1
 }
 if ($wanted.Contains("GRANOLA_WEBHOOK_SECRET") -and -not $wanted["GRANOLA_WEBHOOK_SECRET"].StartsWith("whsec_")) {
     Write-Host ""
-    Write-Host "  That does not look like a signing secret — they start with 'whsec_'." -ForegroundColor Yellow
+    Write-Host "  That does not look like a signing secret -- they start with 'whsec_'." -ForegroundColor Yellow
     Write-Host "  Nothing was changed." -ForegroundColor Yellow
     Write-Host ""
     exit 1
@@ -156,7 +156,7 @@ if ($toAdd.Count -gt 0) {
     Written without a byte-order mark, deliberately.
 
     Windows PowerShell's Out-File -Encoding UTF8 prepends a BOM, and a BOM at
-    the top of a YAML file makes the first key unparseable — so the deploy
+    the top of a YAML file makes the first key unparseable -- so the deploy
     fails on a file that looks perfectly correct in every editor.
 #>
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)

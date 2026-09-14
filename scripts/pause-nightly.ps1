@@ -3,7 +3,7 @@
 
     Use this when something is spending money and you want it to stop now,
     without first working out which job is responsible. Pausing takes effect at
-    once — no build, no deploy, nothing to wait for.
+    once -- no build, no deploy, nothing to wait for.
 
         .\scripts\pause-nightly.ps1                 pause everything
         .\scripts\pause-nightly.ps1 -List           show what exists, change nothing
@@ -25,7 +25,7 @@ param(
 <#
     Deliberately NOT "Stop".
 
-    gcloud writes progress and advisory notes to stderr — "We are using the App
+    gcloud writes progress and advisory notes to stderr -- "We are using the App
     Engine app location (us-central1) as the default location" is a warning,
     not a failure. Under ErrorActionPreference = Stop, PowerShell turns any
     stderr line from a native command into a terminating NativeCommandError, so
@@ -47,7 +47,7 @@ function Show-AuthHelp {
         Write-Host ""
         Write-Host "      gcloud auth login" -ForegroundColor White
         Write-Host ""
-        Write-Host "  Not the same as 'gcloud auth application-default login' — that one"
+        Write-Host "  Not the same as 'gcloud auth application-default login' -- that one"
         Write-Host "  signs in local scripts that read Firestore; this one signs in gcloud."
         Write-Host ""
         Write-Host "  Or pause the jobs in the console, which needs no terminal:" -ForegroundColor Cyan

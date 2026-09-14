@@ -1,7 +1,7 @@
 <#
     Starts scheduled jobs again.
 
-    By default it resumes only the jobs that cost nothing — the nightly backup,
+    By default it resumes only the jobs that cost nothing -- the nightly backup,
     the monthly portfolio snapshot, the weekly website diff. The jobs that call
     Gemini stay paused unless you name one, because those are what ran up a
     bill and restoring everything with one keystroke is how that happens twice.
