@@ -11,7 +11,7 @@ import http from "http";
 import { fetchFirmPages, isRoleInbox } from "./siteScrape.ts";
 import { isAllowed } from "./src/access.ts";
 import { scanFirm, discoverCoInvestors, runInvestorResearch, runFirmEnrichment } from "./investorResearch.ts";
-import { noteGrounded } from "./aiBudget.ts";
+import { noteGrounded, assertCanSpend, BudgetExhausted } from "./aiBudget.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
 /**
@@ -195,6 +195,7 @@ Return the information strictly as a JSON object matching this schema:
 }
 `;
 
+      await assertCanSpend(getDb(), 1);
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
@@ -233,6 +234,7 @@ Return the information strictly as a JSON object matching this schema:
       }
       res.json(data);
     } catch (error) {
+      if (error instanceof BudgetExhausted) return res.status(429).json({ error: error.message, budgetExhausted: true });
       console.error("Error scanning website:", error);
       res.status(500).json({ error: "Failed to scan website" });
     }
@@ -269,6 +271,7 @@ Return the information strictly as a JSON object matching this schema:
       // The research itself lives in investorResearch.ts so the overnight job
       // runs exactly this code rather than a copy of it. The email rules in
       // particular are not something to maintain in two places.
+      await assertCanSpend(getDb(), 1);
       const result = await scanFirm(getGeminiAI(), GEMINI_MODEL, { url, firmName });
       // Counted against the same monthly allowance the scheduled jobs draw on,
       // so a night of research cannot quietly spend what somebody clicking
@@ -276,6 +279,7 @@ Return the information strictly as a JSON object matching this schema:
       noteGrounded(getDb(), result.groundedCalls);
       res.json(result);
     } catch (error) {
+      if (error instanceof BudgetExhausted) return res.status(429).json({ error: error.message, budgetExhausted: true });
       console.error("Error scanning investor firm:", error);
       res.status(500).json({ error: "Failed to scan firm" });
     }
@@ -301,6 +305,7 @@ Return the information strictly as a JSON object matching this schema:
       if (!firmName) {
         return res.status(400).json({ error: "A firm name is required." });
       }
+      await assertCanSpend(getDb(), 10);
       const result = await discoverCoInvestors(getGeminiAI(), GEMINI_MODEL, {
         firmName,
         website,
@@ -310,6 +315,7 @@ Return the information strictly as a JSON object matching this schema:
       noteGrounded(getDb(), result.groundedCalls);
       res.json(result);
     } catch (error) {
+      if (error instanceof BudgetExhausted) return res.status(429).json({ error: error.message, budgetExhausted: true });
       console.error("Error discovering firm co-investors:", error);
       res.status(500).json({ error: "Failed to research co-investors" });
     }
@@ -340,6 +346,7 @@ Return the information strictly as a JSON object matching this schema:
 }
 `;
 
+      await assertCanSpend(getDb(), 1);
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
@@ -383,6 +390,7 @@ Return the information strictly as a JSON object matching this schema:
       }
       res.json(data);
     } catch (error) {
+      if (error instanceof BudgetExhausted) return res.status(429).json({ error: error.message, budgetExhausted: true });
       console.error("Error discovering coinvestors:", error);
       res.status(500).json({ error: "Failed to discover coinvestors" });
     }
@@ -434,6 +442,7 @@ Rules:
   valid answer.
 `;
 
+      await assertCanSpend(getDb(), 1);
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
@@ -534,6 +543,7 @@ Rules:
         lastRound: clean(data.lastRound),
       });
     } catch (error) {
+      if (error instanceof BudgetExhausted) return res.status(429).json({ error: error.message, budgetExhausted: true });
       console.error("Error enriching company:", error);
       res.status(500).json({ error: "Failed to research company" });
     }
@@ -675,6 +685,7 @@ Rules:
       for (const person of due) {
         summary.scanned++;
         try {
+          await assertCanSpend(getDb(), 1);
           const response = await ai.models.generateContent({
             model: GEMINI_MODEL,
             contents: `

@@ -28,6 +28,13 @@ export const MONTHLY_FREE_GROUNDED = Number(process.env.AI_GROUNDED_MONTHLY_CAP)
 /** Held back for people using the app. Scheduled jobs may not touch it. */
 export const INTERACTIVE_RESERVE = Number(process.env.AI_INTERACTIVE_RESERVE) || 1200;
 
+/**
+ * The stop switch. Set AI_HARD_STOP=true in env.yaml and redeploy, and every
+ * grounded call in the application refuses immediately — scheduled and
+ * interactive alike. There to be reached for without having to think.
+ */
+export const HARD_STOP = String(process.env.AI_HARD_STOP || '').toLowerCase() === 'true';
+
 /** The ceiling the scheduled jobs stop at. */
 export const SCHEDULED_CEILING = Math.max(0, MONTHLY_FREE_GROUNDED - INTERACTIVE_RESERVE);
 
@@ -107,10 +114,99 @@ export async function recordGrounded(db: Firestore, calls: number): Promise<void
  * The count matters, but not enough to add a Firestore round trip to a request
  * somebody is sitting in front of, and certainly not enough to fail that
  * request if the write fails.
+ *
+ * Also updates the in-memory figure the gate reads, so a burst of requests
+ * inside one cache window still counts against the ceiling rather than all
+ * seeing the same stale total and all being let through.
  */
 export function noteGrounded(db: Firestore | null, calls: number): void {
   if (!db) return;
+  cached.used += calls;
   recordGrounded(db, calls).catch((err) => {
     console.warn(`[ai-budget] could not record ${calls} grounded call(s): ${err?.message || err}`);
   });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The gate
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Counting was never a control.
+ *
+ * The first version of this file recorded every grounded call and stopped
+ * only the two scheduled jobs. Everything else — the scan buttons, co-investor
+ * research, company enrichment, and above all the Sourcing tab's automatic
+ * research loop — was counted and then allowed to proceed. The loop runs one
+ * grounded search roughly every five seconds for as long as the tab is open,
+ * which is about seven hundred an hour that nothing in the system was in a
+ * position to refuse.
+ *
+ * A ceiling that only some callers observe is not a ceiling. This is the one
+ * every path goes through.
+ */
+
+let cached = { used: 0, period: '', at: 0 };
+const CACHE_MS = 20_000;
+
+/**
+ * Deliberately cached, and deliberately only for a few seconds.
+ *
+ * Reading Firestore before every model call would add a round trip to a
+ * request somebody is waiting on. Twenty seconds of staleness is worth at most
+ * a handful of calls past the line, against a ceiling that already holds back
+ * a reserve — and noteGrounded increments the cached figure as calls are made,
+ * so a burst inside one window is still counted.
+ */
+async function usedThisMonth(db: Firestore): Promise<number> {
+  const now = period();
+  if (cached.period === now && Date.now() - cached.at < CACHE_MS) return cached.used;
+  const budget = await readBudget(db);
+  cached = { used: budget.used, period: now, at: Date.now() };
+  return cached.used;
+}
+
+export class BudgetExhausted extends Error {
+  readonly used: number;
+  readonly ceiling: number;
+  constructor(used: number, ceiling: number, scope: string) {
+    super(
+      `The month's free Gemini allowance is spent (${used} of ${ceiling} grounded searches used). ` +
+        `${scope} AI research is paused until the 1st, so this cannot run up a bill. ` +
+        `Raise AI_GROUNDED_MONTHLY_CAP in env.yaml if you have decided to pay for more.`,
+    );
+    this.name = 'BudgetExhausted';
+    this.used = used;
+    this.ceiling = ceiling;
+  }
+}
+
+/**
+ * Throws unless there is room for `calls` more grounded searches.
+ *
+ * Called immediately before the model call, never after. Interactive callers
+ * may spend the whole free allowance including the reserve; scheduled jobs
+ * stop at the lower ceiling so a night of research cannot take what somebody
+ * clicking Research tomorrow morning will need.
+ */
+export async function assertCanSpend(
+  db: Firestore | null,
+  calls = 1,
+  kind: 'interactive' | 'scheduled' = 'interactive',
+): Promise<void> {
+  if (HARD_STOP) {
+    throw new BudgetExhausted(0, 0, 'All');
+  }
+  if (!db) return;
+  const ceiling = kind === 'scheduled' ? SCHEDULED_CEILING : MONTHLY_FREE_GROUNDED;
+  const used = await usedThisMonth(db);
+  if (used + calls > ceiling) {
+    throw new BudgetExhausted(used, ceiling, kind === 'scheduled' ? 'Overnight' : 'On-demand');
+  }
+}
+
+/** True when there is no room left. For reporting, not for gating. */
+export async function isExhausted(db: Firestore): Promise<boolean> {
+  if (HARD_STOP) return true;
+  return (await usedThisMonth(db)) >= MONTHLY_FREE_GROUNDED;
 }

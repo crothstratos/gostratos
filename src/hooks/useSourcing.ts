@@ -23,11 +23,30 @@ import { recordPerson } from '../peopleDirectory';
  *   a cost decision here so much as the only thing that actually works.
  */
 
-/** Gap between research calls. Enough to stay clear of per-minute limits. */
-const RESEARCH_GAP_MS = 1500;
+/**
+ * Gap between research calls.
+ *
+ * Was 1500ms, which is about seven hundred grounded searches an hour for as
+ * long as the tab is open. Nothing stopped it, and a tab left open for an
+ * afternoon is the most likely explanation for a bill nobody authorised. The
+ * server now refuses over the allowance, but the gap is also widened: the
+ * queue is worked through over hours rather than minutes, which is the right
+ * pace for something that runs unattended and spends money.
+ */
+const RESEARCH_GAP_MS = 20_000;
 
 /** How often the idle loop looks for newly discovered work. */
-const IDLE_POLL_MS = 2500;
+const IDLE_POLL_MS = 30_000;
+
+/**
+ * How many companies one open tab will research before it stops.
+ *
+ * The loop used to run for as long as the tab was open, which meant its cost
+ * was set by how long somebody left a browser window open — not a decision
+ * anybody made. After this many it stops and waits to be asked, which turns an
+ * unbounded background spend into a bounded one.
+ */
+const MAX_PER_SESSION = 25;
 
 /** Same derivation the contacts importer uses, so ids are stable across runs. */
 async function idFor(nameKey: string): Promise<string> {
@@ -49,6 +68,8 @@ export function useSourcing(
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [researchingId, setResearchingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Why automatic research stopped, when it has. Shown in the tab. */
+  const [pausedReason, setPausedReason] = useState<string | null>(null);
 
   // --- live list
   useEffect(() => {
@@ -154,6 +175,21 @@ export function useSourcing(
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        /**
+         * The month's allowance is gone. Stop the whole loop.
+         *
+         * Not marked as a failed row: the company is fine, we simply cannot
+         * afford to look at it this month, and flagging it failed would mean
+         * it never gets researched once the allowance resets. The loop halts
+         * so it does not walk the rest of the queue collecting the same
+         * refusal several hundred times.
+         */
+        if (response.status === 429 && body.budgetExhausted) {
+          haltedRef.current = true;
+          attempted.current.delete(candidate.id);
+          setPausedReason(body.error || "The month's free AI allowance is spent.");
+          return;
+        }
         throw new Error(body.error || `Server error: ${response.status}`);
       }
       const data = await response.json();
@@ -245,6 +281,16 @@ export function useSourcing(
   // forever, which is an expensive way to keep failing.
   const attempted = useRef<Set<string>>(new Set());
 
+  /**
+   * Set when the server says the month's allowance is gone.
+   *
+   * A ref rather than state because the loop reads it between iterations and
+   * must see the change immediately; a state update would not reach the
+   * closure already running.
+   */
+  const haltedRef = useRef(false);
+  const doneThisSession = useRef(0);
+
   useEffect(() => {
     if (!enabled) return;
     let stopped = false;
@@ -252,6 +298,15 @@ export function useSourcing(
 
     (async () => {
       while (!stopped) {
+        if (haltedRef.current) return;
+
+        if (doneThisSession.current >= MAX_PER_SESSION) {
+          setPausedReason(
+            `Paused after researching ${MAX_PER_SESSION} companies. Reload the tab to continue.`
+          );
+          return;
+        }
+
         const next = candidatesRef.current.find(
           c => c.status === 'active' && c.researchState === 'pending' && !attempted.current.has(c.id)
         );
@@ -262,8 +317,9 @@ export function useSourcing(
         }
 
         attempted.current.add(next.id);
+        doneThisSession.current++;
         await research(next);
-        if (stopped) return;
+        if (stopped || haltedRef.current) return;
         await sleep(RESEARCH_GAP_MS);
       }
     })();
@@ -307,6 +363,7 @@ export function useSourcing(
     pendingCount,
     error,
     setError,
+    pausedReason,
     discover,
     research,
     dismiss,
