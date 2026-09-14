@@ -20,6 +20,38 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-GcloudAuth {
+    param([string[]]$Output)
+    $text = ($Output -join "`n")
+    # gcloud cannot show its reauth prompt when its output is being captured,
+    # so an expired CLI login surfaces here as "cannot prompt during
+    # non-interactive execution" rather than as anything about logging in.
+    if ($text -match "Reauthentication failed" -or
+        $text -match "cannot prompt during non-interactive" -or
+        $text -match "credentials are no longer valid" -or
+        $text -match "You do not currently have an active account" -or
+        $text -match "invalid_grant" -or
+        $text -match "Your current credentials are invalid") {
+
+        Write-Host ""
+        Write-Host "  Your gcloud sign-in has expired." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Run this, then try again:" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "      gcloud auth login" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Note: this is NOT the same as 'gcloud auth application-default login'."
+        Write-Host "  That one signs in local scripts that read Firestore. This one signs in"
+        Write-Host "  the gcloud command itself, which is what this script uses."
+        Write-Host ""
+        Write-Host "  No terminal handy? Pause the jobs in the console instead:" -ForegroundColor Cyan
+        Write-Host "  https://console.cloud.google.com/cloudscheduler"
+        Write-Host ""
+        return $true
+    }
+    return $false
+}
+
 # Jobs that make no model calls. Matched on a fragment of the job id, because
 # App Engine derives those ids from the cron URL and they carry a prefix.
 $FREE = @("firestore-export", "portfolio-snapshot", "site-diff")
@@ -29,6 +61,7 @@ Write-Host "Project: $Project" -ForegroundColor Cyan
 
 $raw = gcloud scheduler jobs list --project=$Project --format="value(name,state)" 2>&1
 if ($LASTEXITCODE -ne 0) {
+    if (Test-GcloudAuth $raw) { exit 1 }
     Write-Host "Could not list scheduled jobs." -ForegroundColor Red
     Write-Host $raw
     exit 1

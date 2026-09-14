@@ -23,6 +23,38 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-GcloudAuth {
+    param([string[]]$Output)
+    $text = ($Output -join "`n")
+    # gcloud cannot show its reauth prompt when its output is being captured,
+    # so an expired CLI login surfaces here as "cannot prompt during
+    # non-interactive execution" rather than as anything about logging in.
+    if ($text -match "Reauthentication failed" -or
+        $text -match "cannot prompt during non-interactive" -or
+        $text -match "credentials are no longer valid" -or
+        $text -match "You do not currently have an active account" -or
+        $text -match "invalid_grant" -or
+        $text -match "Your current credentials are invalid") {
+
+        Write-Host ""
+        Write-Host "  Your gcloud sign-in has expired." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Run this, then try again:" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "      gcloud auth login" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Note: this is NOT the same as 'gcloud auth application-default login'."
+        Write-Host "  That one signs in local scripts that read Firestore. This one signs in"
+        Write-Host "  the gcloud command itself, which is what this script uses."
+        Write-Host ""
+        Write-Host "  No terminal handy? Pause the jobs in the console instead:" -ForegroundColor Cyan
+        Write-Host "  https://console.cloud.google.com/cloudscheduler"
+        Write-Host ""
+        return $true
+    }
+    return $false
+}
+
 Write-Host ""
 Write-Host "Project: $Project" -ForegroundColor Cyan
 Write-Host ""
@@ -32,10 +64,9 @@ Write-Host ""
 $raw = gcloud scheduler jobs list --project=$Project --format="value(name,state)" 2>&1
 
 if ($LASTEXITCODE -ne 0) {
+    if (Test-GcloudAuth $raw) { exit 1 }
     Write-Host "Could not list scheduled jobs." -ForegroundColor Red
     Write-Host $raw
-    Write-Host ""
-    Write-Host "If that is a credentials error, run:  gcloud auth login" -ForegroundColor Yellow
     exit 1
 }
 
@@ -81,14 +112,18 @@ Write-Host "Pausing $($running.Count) job(s)..." -ForegroundColor Yellow
 Write-Host ""
 
 $failed = 0
+$script:explained = $false
 foreach ($j in $running) {
     Write-Host ("  {0,-34} " -f $j.Id) -NoNewline
-    gcloud scheduler jobs pause $j.Id --location=$j.Location --project=$Project --quiet 2>&1 | Out-Null
+    $out = gcloud scheduler jobs pause $j.Id --location=$j.Location --project=$Project --quiet 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "paused" -ForegroundColor Green
     } else {
         Write-Host "FAILED" -ForegroundColor Red
         $failed++
+        # Checked once. A sign-in that lapsed mid-run fails every remaining
+        # job for the same reason, and printing it once is the useful amount.
+        if (-not $script:explained -and (Test-GcloudAuth $out)) { $script:explained = $true }
     }
 }
 
