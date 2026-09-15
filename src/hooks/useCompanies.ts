@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, runTransaction } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, runTransaction, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Company, Stage, InteractionLog } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -82,63 +82,100 @@ export function useCompanies(user: any) {
     return () => unsubscribe();
   }, [user]);
 
-  // Automated rule: Move companies in Initial Review for 3 weeks to Watchlist
+  /**
+   * Moves companies that have sat in Initial Review for three weeks to
+   * Watchlist. Runs once, after the pipeline has loaded.
+   *
+   * It used to depend on `companies` and write to `companies`, with the writes
+   * un-awaited. Every write landed as its own snapshot, every snapshot re-ran
+   * this effect, and every company whose write had not landed yet was still
+   * in Initial Review and still stale -- so it was written again. N stale
+   * companies produced on the order of N-squared writes, each one triggering a
+   * snapshot that re-processed the whole collection.
+   *
+   * That is what locked the browser up when somebody moved a company to
+   * Initial Review: the move changed `companies`, which started the cascade.
+   *
+   * Three things stop it now. A ref makes the sweep run once per session
+   * rather than once per snapshot. A second ref remembers which companies have
+   * already been written, so a re-run can never write the same one twice. And
+   * the writes go in one batch, awaited, so they land as a single snapshot
+   * instead of N.
+   */
+  const sweepDone = useRef(false);
+  const swept = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (isLoading || companies.length === 0) return;
+    if (sweepDone.current) return;
+    sweepDone.current = true;
 
     const now = new Date();
     const threeWeeksInMs = 3 * 7 * 24 * 60 * 60 * 1000;
-    
+
     const staleCompanies = companies.filter(company => {
       if (company.stage !== 'Initial Review') return false;
-      
-      let dateEntered = null;
+      if (swept.current.has(company.id)) return false;
+
+      let dateEntered: Date | null = null;
       if (company.stageHistory && company.stageHistory.length > 0) {
-        // Find the entry that corresponds to entering "Initial Review"
         const lastEntry = company.stageHistory[company.stageHistory.length - 1];
         if (lastEntry.stage === 'Initial Review') {
           dateEntered = new Date(lastEntry.date);
         } else {
-          // Fallback to lastModified if the history is malformed for current stage
           dateEntered = company.lastModified ? new Date(company.lastModified) : null;
         }
       } else {
-        // Fallback to lastModified if no stageHistory exists
         dateEntered = company.lastModified ? new Date(company.lastModified) : null;
       }
 
-      if (dateEntered && (now.getTime() - dateEntered.getTime() > threeWeeksInMs)) {
-        return true;
-      }
-      return false;
+      // An unparseable date is not an old one. Before, NaN comparisons made
+      // this false anyway; saying so explicitly keeps it that way.
+      if (!dateEntered || Number.isNaN(dateEntered.getTime())) return false;
+      return now.getTime() - dateEntered.getTime() > threeWeeksInMs;
     });
 
-    if (staleCompanies.length > 0) {
-      staleCompanies.forEach(company => {
-        const updateDateStr = new Date().toISOString();
-        const newInteraction: InteractionLog = {
-          id: uuidv4(),
-          date: updateDateStr,
-          type: 'Other',
-          notes: 'No response received after 3 weeks in Initial Review.',
-          sentiment: 'Neutral'
-        };
+    if (staleCompanies.length === 0) return;
 
-        const companyRef = doc(db, 'companies', company.id);
-        
-        const updates = {
-          stage: 'Watchlist' as Stage,
-          lastModified: updateDateStr,
-          stageHistory: [...(company.stageHistory || []), { stage: 'Watchlist' as Stage, date: updateDateStr }],
-          interactions: [newInteraction, ...(company.interactions || [])]
-        };
+    (async () => {
+      const updateDateStr = new Date().toISOString();
+      const CHUNK = 400;   // Firestore caps a batch at 500
 
-        updateDoc(companyRef, updates).catch(err => {
+      for (let i = 0; i < staleCompanies.length; i += CHUNK) {
+        const slice = staleCompanies.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+
+        for (const company of slice) {
+          swept.current.add(company.id);
+          const newInteraction: InteractionLog = {
+            id: uuidv4(),
+            date: updateDateStr,
+            type: 'Other',
+            notes: 'No response received after 3 weeks in Initial Review.',
+            sentiment: 'Neutral',
+          };
+          batch.update(doc(db, 'companies', company.id), {
+            stage: 'Watchlist' as Stage,
+            lastModified: updateDateStr,
+            stageHistory: [...(company.stageHistory || []), { stage: 'Watchlist' as Stage, date: updateDateStr }],
+            interactions: [newInteraction, ...(company.interactions || [])],
+          });
+        }
+
+        try {
+          await batch.commit();
+        } catch (err) {
           handleFirestoreError(err, OperationType.UPDATE, 'companies');
-        });
-      });
-    }
-  }, [companies, isLoading]);
+          return;
+        }
+      }
+
+      console.log(`[pipeline] moved ${staleCompanies.length} stale companies to Watchlist`);
+    })();
+    // companies is read, not tracked: the ref above is what makes this run
+    // once, and adding companies back to the deps is what caused the cascade.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
 
   const handleMoveCompany = useCallback(async (companyId: string, newStage: Stage) => {
     const now = new Date().toISOString();
