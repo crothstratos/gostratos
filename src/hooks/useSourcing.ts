@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDocs,
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDocs, writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { apiFetch } from '../services/api';
@@ -127,32 +127,82 @@ export function useSourcing(
         byKey.set(data.nameKey, data);
       }
 
-      const writes: Promise<unknown>[] = [];
+      /**
+       * Work out every write first, then commit them in batches.
+       *
+       * This used to build an array of individual setDoc/updateDoc promises
+       * and hand the lot to Promise.all. With a few dozen candidates that is
+       * fine. With a few thousand -- which is what an investor repository
+       * full of auto-discovered firms produces -- it opens a few thousand
+       * concurrent Firestore writes from a browser tab, and the tab stops
+       * responding. That is the freeze.
+       *
+       * Batched commits are also atomic per chunk, so a failure halfway
+       * through leaves whole batches applied rather than an arbitrary subset.
+       */
+      type Op =
+        | { kind: 'set'; id: string; data: Record<string, unknown> }
+        | { kind: 'update'; id: string; data: Record<string, unknown> }
+        | { kind: 'delete'; id: string };
 
-      for (const [key, { name, firms }] of found) {
-        const current = byKey.get(key);
-        if (!current) {
-          const id = await idFor(key);
-          writes.push(setDoc(doc(db, 'sourcing', id), {
+      const ops: Op[] = [];
+
+      // Hashing is async, so compute every id at once rather than awaiting
+      // one per iteration inside the loop.
+      const fresh = [...found.entries()].filter(([key]) => !byKey.has(key));
+      const freshIds = await Promise.all(fresh.map(([key]) => idFor(key)));
+
+      fresh.forEach(([key, { name, firms }], i) => {
+        ops.push({
+          kind: 'set',
+          id: freshIds[i],
+          data: {
             name,
             nameKey: key,
             sourceFirms: firms,
             status: 'active',
             researchState: 'pending',
             discoveredAt: new Date().toISOString(),
-          }));
-        } else if (JSON.stringify(current.sourceFirms || []) !== JSON.stringify(firms)) {
+          },
+        });
+      });
+
+      for (const [key, { firms }] of found) {
+        const current = byKey.get(key);
+        if (!current) continue;
+        if (JSON.stringify(current.sourceFirms || []) !== JSON.stringify(firms)) {
           // A second firm now lists it, which is itself a signal worth seeing.
-          writes.push(updateDoc(doc(db, 'sourcing', current.id), { sourceFirms: firms }));
+          ops.push({ kind: 'update', id: current.id, data: { sourceFirms: firms } });
         }
       }
 
       // Rows whose company is now in the CRM have served their purpose.
       for (const [key, candidate] of byKey) {
-        if (crmIndex.has(key)) writes.push(deleteDoc(doc(db, 'sourcing', candidate.id)));
+        if (crmIndex.has(key)) ops.push({ kind: 'delete', id: candidate.id });
       }
 
-      await Promise.all(writes);
+      // Firestore caps a batch at 500. Committed one chunk at a time, on
+      // purpose: the point is to stop flooding the connection, and firing
+      // every batch at once would only move the flood up a level.
+      const CHUNK = 400;
+      for (let i = 0; i < ops.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const op of ops.slice(i, i + CHUNK)) {
+          const ref = doc(db, 'sourcing', op.id);
+          if (op.kind === 'set') batch.set(ref, op.data);
+          else if (op.kind === 'update') batch.update(ref, op.data);
+          else batch.delete(ref);
+        }
+        await batch.commit();
+      }
+
+      if (ops.length > 500) {
+        console.warn(
+          `[sourcing] reconciled ${ops.length} rows across ${investors.length} investors. ` +
+          `A number this large usually means the investor repository has filled up with ` +
+          `auto-discovered firms; see scripts/discovered-firms.cjs.`
+        );
+      }
     } catch (err: any) {
       handleFirestoreError(err, OperationType.CREATE, 'sourcing');
       setError(err.message || 'Discovery failed.');

@@ -8,6 +8,7 @@ import { useSourcing } from '../hooks/useSourcing';
 import { useInvestors } from '../hooks/useInvestors';
 import { cn } from '../utils';
 import { scoreSourcingCandidate, FitScore } from '../fitScore';
+import { normaliseCompanyName } from '../companyMatch';
 import { FitDial } from './FitDial';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -41,18 +42,46 @@ export function SourcingTab({
   const [query, setQuery] = useState('');
   const [movingId, setMovingId] = useState<string | null>(null);
 
-  // Reconcile whenever the inputs change. Free, and it means a company added
-  // to the CRM by hand disappears from here without anyone pressing anything.
-  const signature = useMemo(
-    () => `${investors.length}:${investors.map(i => (i.portfolioCompanies || []).length).join(',')}:${companies.length}`,
-    [investors, companies]
+  /**
+   * Re-discover when the INVESTORS change. Not when the companies do.
+   *
+   * companies.length used to be part of this, and it made moving a company to
+   * Initial Review cost a full re-discovery: every investor's portfolio walked
+   * again, the whole sourcing collection read again, and a write for every row
+   * that had shifted. On a large repository that is tens of seconds with the
+   * tab unresponsive, triggered by the one button people press most.
+   *
+   * It was never needed. Adding a company can only ever REMOVE a candidate
+   * from this list, never create one, and removal does not need a round trip:
+   * crmKeys below filters it out on the spot. The stored row is tidied up on
+   * the next real discovery.
+   */
+  const investorSignature = useMemo(
+    () => `${investors.length}:${investors.map(i => (i.portfolioCompanies || []).length).join(',')}`,
+    [investors]
   );
   React.useEffect(() => {
     if (investors.length) discover();
-    // Keyed on the shape of the inputs rather than their identity, which
+    // Keyed on the shape of the investors rather than their identity, which
     // changes on every Firestore snapshot and would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [investorSignature]);
+
+  /**
+   * Companies already in the CRM, by the same normalised key discovery uses.
+   *
+   * Recomputed only when the pipeline changes, and then it is a set lookup per
+   * row. This is what makes a company vanish from Sourcing the instant it is
+   * moved, with no Firestore work at all.
+   */
+  const crmKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const c of companies) {
+      const k = normaliseCompanyName(c.name || '');
+      if (k) keys.add(k);
+    }
+    return keys;
+  }, [companies]);
 
   /**
    * Every row with its fit against the mandate, best first.
@@ -69,6 +98,9 @@ export function SourcingTab({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return candidates
+      // Moved to the CRM since this list was built. Hidden immediately; the
+      // row itself is removed by the next discovery.
+      .filter(c => !crmKeys.has(c.nameKey))
       .filter(c => (filter === 'active' ? c.status !== 'dismissed' : c.status === 'dismissed'))
       .filter(c => !q
         || c.name.toLowerCase().includes(q)
@@ -81,7 +113,7 @@ export function SourcingTab({
         if (firms !== 0) return firms;
         return a.c.name.localeCompare(b.c.name);
       });
-  }, [candidates, filter, query]);
+  }, [candidates, filter, query, crmKeys]);
 
   const activeCount = candidates.filter(c => c.status !== 'dismissed').length;
   const dismissedCount = candidates.filter(c => c.status === 'dismissed').length;
