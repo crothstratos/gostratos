@@ -4,6 +4,7 @@ import { Company, STAGES, VERTICALS, TEAM_MEMBERS } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { LocationInput } from './LocationInput';
 import { useGemini } from '../hooks/useGemini';
+import { fillBlanks } from '../fillBlanks';
 import { useAttachments } from '../hooks/useAttachments';
 
 interface AddCompanyModalProps {
@@ -40,34 +41,13 @@ export const AddCompanyModal = React.memo(function AddCompanyModal({ onClose, on
     []
   );
 
-  /**
-   * Merges only the fields the extraction actually answered.
-   *
-   * The prompt asks for null where a fact is not in the notes, and a plain
-   * spread wrote every one of those nulls straight into the form: paste a
-   * short note after typing the name and website by hand, and auto-populate
-   * blanked them, then saved null over them. Anything the notes did not
-   * answer is left exactly as the person left it.
-   */
-  const mergeExtracted = (prev: any, extracted: Record<string, any>) => {
-    const merged: any = { ...prev };
-    for (const [field, value] of Object.entries(extracted || {})) {
-      if (value === null || value === undefined) continue;
-      if (typeof value === 'string' && value.trim() === '') continue;
-      // Some models answer the schema rather than the question.
-      if (typeof value === 'string' && /^(n\/?a|none|unknown|not found|not specified)$/i.test(value.trim())) continue;
-      merged[field] = value;
-    }
-    return merged;
-  };
-
   const handlePitchDeckChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     handlePitchDeckExtract(file, (extractedData) => {
       setFormData((prev) => {
-        const updated = mergeExtracted(prev, extractedData);
+        const updated = fillBlanks(prev, extractedData);
         if (extractedData.takeaways || extractedData.nextSteps) {
           const newInteraction = {
             id: Date.now().toString(),
@@ -131,7 +111,7 @@ export const AddCompanyModal = React.memo(function AddCompanyModal({ onClose, on
   const handleAutoPopulate = () => {
     originalHandleAutoPopulate(notes, (extractedData) => {
       setFormData((prev) => {
-        const updated = mergeExtracted(prev, extractedData);
+        const updated = fillBlanks(prev, extractedData);
         if (extractedData.takeaways || extractedData.nextSteps) {
           const newInteraction = {
             id: Date.now().toString(),

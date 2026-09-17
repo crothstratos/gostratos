@@ -11,6 +11,7 @@ import { cn, formatLocation } from '../utils';
 import { runwayMonths, formatRunway } from '../money';
 import { useAttachments } from '../hooks/useAttachments';
 import { useGemini } from '../hooks/useGemini';
+import { fillBlanks } from '../fillBlanks';
 import { useInvestors } from '../hooks/useInvestors';
 import { useAuth } from './AuthContext';
 
@@ -378,7 +379,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
     handlePitchDeckExtract(file, (extractedData) => {
       setFormData((prev) => {
         if (!prev) return null;
-        const updated = { ...prev, ...extractedData };
+        const updated = fillBlanks(prev, extractedData);
         if (extractedData.takeaways || extractedData.nextSteps) {
           const newInteraction = {
             id: Date.now().toString(),
@@ -417,7 +418,7 @@ export const CompanyModal = React.memo(function CompanyModal({ company, onClose,
     originalHandleAutoPopulate(notes, (extractedData) => {
       setFormData((prev) => {
         if (!prev) return null;
-        const updated = { ...prev, ...extractedData };
+        const updated = fillBlanks(prev, extractedData);
         if (extractedData.takeaways || extractedData.nextSteps) {
           const newInteraction = {
             id: Date.now().toString(),
