@@ -46,15 +46,34 @@ export interface FitScore {
 const lower = (s: unknown) => String(s ?? '').toLowerCase();
 
 /** Whole-word-ish containment, so "ai" does not match "chair" or "retail". */
+/**
+ * Compiled matchers, kept between calls.
+ *
+ * Scoring one candidate asks this question a few hundred times, and the tab
+ * scores every candidate on every pass. Building the same RegExp object from
+ * the same literal string each time was most of the cost of a pass — the
+ * terms come from a fixed list in mandate.ts, so there are only ever a few
+ * dozen distinct ones to compile. null means "this term needs no regex".
+ */
+const PATTERNS = new Map<string, RegExp | null>();
+
+function patternFor(term: string): RegExp | null {
+  if (PATTERNS.has(term)) return PATTERNS.get(term)!;
+  const compiled = /\s|-/.test(term)
+    ? null
+    : new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+  PATTERNS.set(term, compiled);
+  return compiled;
+}
+
 function mentions(haystack: string, term: string): boolean {
   const t = term.toLowerCase().trim();
   if (!t) return false;
   // Multi-word terms are matched plainly; single short words get boundaries,
   // which is the difference between finding "AI" and finding it inside
   // "certain", "email" and "retail" — all of which happen constantly.
-  if (/\s|-/.test(t)) return haystack.includes(t);
-  const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`).test(haystack);
+  const re = patternFor(t);
+  return re ? re.test(haystack) : haystack.includes(t);
 }
 
 function anyMention(haystack: string, terms: string[]): string[] {

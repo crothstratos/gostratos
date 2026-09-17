@@ -606,6 +606,18 @@ export interface Company {
   /** When a Granola note was last filed against this company. */
   lastGranolaSyncAt?: string;
 
+  /**
+   * Set when the record was made by an integration rather than by a person.
+   *
+   * A company nobody chose to add has to be tellable from one somebody did:
+   * it may be a duplicate under a different name, or a call that was never
+   * really a pipeline company at all. Labelled, so it can be found, reviewed
+   * and removed without having to work out where it came from.
+   */
+  autoCreatedBy?: 'granola';
+  /** When that happened. */
+  autoCreatedAt?: string;
+
   /** When the Gmail sync last looked at this company's founder. */
   lastGmailSyncAt?: string;
   conversationSummary?: {

@@ -15,6 +15,7 @@ import { noteGrounded, assertCanSpend, BudgetExhausted, HARD_STOP } from "./aiBu
 import {
   verifyGranolaSignature, getNote, matchNote, meetingKey,
   extractFacts, buildInteractionNote, EXTRACTABLE,
+  externalDomains, rootDomain, deriveCompanyName, newCompanyFromNote, sameCompanyName,
 } from "./granola.ts";
 import { getDb, runPortfolioSnapshot, runSiteDiff, peopleDueForCheck, recordPersonCheck, runFirestoreExport } from "./cronJobs.ts";
 
@@ -85,23 +86,101 @@ async function startServer() {
       return { id: d.id, name: String(v.name || ""), website: v.website, founderEmail: v.founderEmail };
     });
 
-    const match = matchNote(note, companies);
+    let match = matchNote(note, companies);
     const key = meetingKey(note);
 
+    /**
+     * A company we do not have yet.
+     *
+     * If exactly one outside company was on the call, that company is new to
+     * us and gets a record, in Analyst Call, with this call logged on it. A
+     * conversation that happened is a company in the CRM, without anybody
+     * typing it in afterwards.
+     *
+     * Exactly one, and the count is the whole safeguard. Zero external
+     * domains is an internal meeting, or a call where everyone dialled in
+     * from gmail — neither names a company. Two is a customer intro or a
+     * partnership, where choosing one would be a guess. Both of those still
+     * park for review, exactly as they did before.
+     */
     if (!match) {
-      // Recorded, not discarded. An unmatched note is usually a company we do
-      // not track yet, which is worth seeing rather than losing.
-      await db.collection("granola_unmatched").doc(noteId).set({
-        noteId,
-        title: note.title || note.calendar_event?.title || null,
-        occurredAt: note.calendar_event?.scheduled_start_time || note.created_at || null,
-        attendees: (note.attendees || []).map((a) => a?.email).filter(Boolean),
-        webUrl: note.web_url || null,
-        meetingKey: key,
-        seenAt: new Date().toISOString(),
-      });
-      console.log(`[granola] ${noteId}: no company matched; parked for review`);
-      return;
+      const domains = externalDomains(note);
+      const domain = domains.length === 1 ? domains[0] : "";
+      const derived = domain ? deriveCompanyName(note, domain) : "";
+
+      // Same company under a record that simply had no website or founder
+      // email on it — which is why the domain did not match anything.
+      const twins = derived ? companies.filter((c) => sameCompanyName(c.name, derived)) : [];
+
+      if (domain && twins.length === 1) {
+        const twin = twins[0];
+        if (!String(twin.website || "").trim()) {
+          // Fill in what we now know, so their next call matches outright.
+          await db.collection("companies").doc(twin.id).update({
+            website: `https://${rootDomain(domain)}`,
+            lastModified: new Date().toISOString(),
+          });
+        }
+        match = {
+          companyId: twin.id,
+          companyName: twin.name,
+          basis: `its name in the meeting title, confirmed by an attendee from ${rootDomain(domain)}`,
+          confidence: "name",
+        };
+      } else if (domain && twins.length === 0) {
+        const record = newCompanyFromNote(note, domain);
+        const newRef = db.collection("companies").doc(String(record.id));
+
+        /**
+         * create(), not set().
+         *
+         * Two people at the firm both running Granola produce two deliveries
+         * for one call, seconds apart, and neither can see the other's write.
+         * The id is derived from the domain so both address the same
+         * document; create() makes the second one fail rather than overwrite
+         * the first, and the failure falls straight through to logging the
+         * call on the record that already exists.
+         */
+        try {
+          await newRef.create(record);
+          console.log(
+            `[granola] ${noteId}: added ${record.name} (${rootDomain(domain)}) in Analyst Call`,
+          );
+        } catch (error: any) {
+          // 6 = ALREADY_EXISTS. Anything else is a real failure.
+          if (error?.code !== 6) throw error;
+          console.log(`[granola] ${noteId}: ${record.name} was created by another delivery`);
+        }
+
+        const created = await newRef.get();
+        match = {
+          companyId: newRef.id,
+          companyName: String((created.data() as any)?.name || record.name),
+          basis:
+            `an attendee from ${rootDomain(domain)} \u2014 this company was added to the CRM from this call`,
+          confidence: "domain",
+        };
+      } else {
+        // Recorded, not discarded. Nothing here names one outside company,
+        // so there is nothing to create that would not be a guess.
+        await db.collection("granola_unmatched").doc(noteId).set({
+          noteId,
+          title: note.title || note.calendar_event?.title || null,
+          occurredAt: note.calendar_event?.scheduled_start_time || note.created_at || null,
+          attendees: (note.attendees || []).map((a) => a?.email).filter(Boolean),
+          externalDomains: domains,
+          webUrl: note.web_url || null,
+          meetingKey: key,
+          seenAt: new Date().toISOString(),
+          reason: domains.length === 0
+            ? "no external company on the call"
+            : `${domains.length} outside companies on the call`,
+        });
+        console.log(
+          `[granola] ${noteId}: no company matched (${domains.length} external domain(s)); parked for review`,
+        );
+        return;
+      }
     }
 
     const ref = db.collection("companies").doc(match.companyId);

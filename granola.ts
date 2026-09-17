@@ -559,3 +559,209 @@ export function buildInteractionNote(
 
   return parts.join("\n").trim();
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Companies we have not met before
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Meeting-admin words. A title is a sentence about a calendar slot, not a
+ * company name, and these are the parts of it that describe the slot.
+ */
+const MEETING_WORDS = new RegExp(
+  "\\b(intro(duction|ductory)?|call|calls|demo|meeting|mtg|sync|catch[- ]?up|follow[- ]?up|" +
+    "followup|weekly|biweekly|monthly|quarterly|chat|discussion|discuss|touch[- ]?base|" +
+    "check[- ]?in|checkin|update|kick[- ]?off|kickoff|debrief|review|deep[- ]?dive|" +
+    "screening|screen|diligence|dd|zoom|google meet|meet|teams|huddle|session|" +
+    "re|fwd|invite|hold|placeholder|tentative|part \\d+|\\d{1,2}(st|nd|rd|th)?)\\b",
+  "gi",
+);
+
+/** The separators people put between the two sides of a meeting title. */
+const TITLE_SPLIT = /\s*(?:<>|<\s*>|>\s*<|\/|\||\+|&|—|–|\bx\b|\bwith\b|\band\b|\bvs\.?\b|:)\s*/gi;
+
+const INTERNAL_NAME_WORDS = new Set([
+  "stratos", "stratosventurepartners", "stratosventures", "svp", "highway",
+  "highwayventures", "gostratos",
+]);
+
+/** Letters only, lowercased, so "Vali Cyber" and "valicyber" compare equal. */
+const nameKeyOf = (s: string): string =>
+  String(s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "");
+
+/** Everyone on the call, by whatever name the invite recorded. */
+function attendeeNameKeys(note: GranolaNote): Set<string> {
+  const people: GranolaUser[] = [
+    ...(note.attendees || []),
+    ...(note.calendar_event?.invitees || []),
+    ...(note.calendar_event?.organizer ? [note.calendar_event.organizer] : []),
+    ...(note.owner ? [note.owner] : []),
+  ];
+  const keys = new Set<string>();
+  for (const p of people) {
+    const full = String(p?.name || "").trim();
+    if (full) {
+      keys.add(nameKeyOf(full));
+      // First name alone: "Todd & Justin (TAHO)" names people, not companies.
+      for (const part of full.split(/\s+/)) if (part.length > 2) keys.add(nameKeyOf(part));
+    }
+    const local = String(p?.email || "").split("@")[0];
+    // first.last@ and firstlast@ are the same person written two ways.
+    if (local) keys.add(nameKeyOf(local));
+  }
+  keys.delete("");
+  return keys;
+}
+
+/** Capitalised domain root: appellatetech.com -> Appellatetech. */
+const nameFromDomain = (domain: string): string => {
+  const root = String(domain || "").split(".")[0].replace(/^go(?=[a-z]{3})/, "");
+  return root ? root.charAt(0).toUpperCase() + root.slice(1) : "";
+};
+
+/**
+ * The company's name, read out of the meeting title.
+ *
+ * Titles in this account are written by whoever booked the call and take
+ * roughly a dozen shapes — "Spidr / Stratos Venture Partners Call",
+ * "Penelope<>Stratos Catch-Up", "Cameron / - Intro Meeting with Experio",
+ * "Daria Sakaris <> Todd & Justin (TAHO)". What they have in common is that
+ * the company is one of the segments and everything else is either us, a
+ * person on the call, or meeting admin.
+ *
+ * So: split, throw away the parts that are people or admin, and keep what is
+ * left. The domain is the fallback and also the tie-breaker — when the title
+ * gives "Pulse" and the domain says pulsepoint.io, the domain is the fuller
+ * form of the same name and wins.
+ *
+ * This only ever chooses a LABEL. It never decides which company a call was
+ * about; the domain does that, and a label that reads oddly is a rename, not
+ * a misfiled call.
+ */
+export function deriveCompanyName(note: GranolaNote, domain: string): string {
+  const title = String(note.title || note.calendar_event?.title || "").trim();
+  const people = attendeeNameKeys(note);
+  const fallback = nameFromDomain(domain);
+
+  const usable = (raw: string): string | null => {
+    const cleaned = raw
+      .replace(MEETING_WORDS, " ")
+      .replace(/[^\p{L}\p{N}&.\- ]/gu, " ")
+      .replace(/\s+/g, " ")
+      .replace(/^[-.\s]+|[-.\s]+$/g, "")
+      .trim();
+    if (cleaned.length < 2) return null;
+    const key = nameKeyOf(cleaned);
+    if (!key || key.length < 2) return null;
+    if (INTERNAL_NAME_WORDS.has(key)) return null;
+    if (people.has(key)) return null;
+    // "Stratos Venture Partners" — any segment that names us at all.
+    if ([...INTERNAL_NAME_WORDS].some((w) => key.startsWith(w))) return null;
+    return cleaned;
+  };
+
+  const candidates: string[] = [];
+
+  // A parenthesised name is nearly always the company, put there precisely
+  // because the rest of the title is people: "Todd & Justin (TAHO)".
+  for (const m of title.matchAll(/\(([^)]{2,40})\)/g)) {
+    const c = usable(m[1]);
+    if (c) candidates.push(c);
+  }
+
+  if (candidates.length === 0) {
+    const stripped = title.replace(/\([^)]*\)/g, " ");
+    for (const segment of stripped.split(TITLE_SPLIT)) {
+      const c = usable(segment || "");
+      if (c) candidates.push(c);
+    }
+  }
+
+  // Shortest survivor: the company is the bare name, the leftovers are
+  // whatever admin escaped the filter, and those are longer.
+  candidates.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  const fromTitle = candidates[0];
+
+  if (!fromTitle) return fallback || "Unknown company";
+
+  // The domain is the same name written out in full — "Pulse" vs pulsepoint.io.
+  const dk = nameKeyOf(fallback);
+  const tk = nameKeyOf(fromTitle);
+  if (dk && tk && dk !== tk && dk.startsWith(tk)) return fallback;
+
+  return fromTitle;
+}
+
+/**
+ * A stable company id for a domain.
+ *
+ * Deterministic on purpose. Two colleagues both running Granola produce two
+ * webhook deliveries for one call, seconds apart, and neither can see the
+ * other's write yet. A random id gives two companies; this gives one document
+ * that both deliveries address, and the second is a no-op.
+ */
+export const companyIdForDomain = (domain: string): string =>
+  "gr-" + crypto.createHash("sha1").update(rootDomain(domain)).digest("hex").slice(0, 16);
+
+/**
+ * The record for a company we have just met.
+ *
+ * Every field the CRM requires is present and empty rather than missing, so
+ * the card opens and edits like any other. The blanks are then filled from
+ * what was said on the call by the same extraction that runs for companies we
+ * already had — this record is a starting point, not a summary.
+ */
+export function newCompanyFromNote(
+  note: GranolaNote,
+  domain: string,
+): Record<string, unknown> {
+  const occurredAt =
+    note.calendar_event?.scheduled_start_time || note.created_at || new Date().toISOString();
+
+  return {
+    id: companyIdForDomain(domain),
+    name: deriveCompanyName(note, domain),
+    stage: "Analyst Call",
+    website: `https://${rootDomain(domain)}`,
+    // Required by the Company type. Present and empty, never absent.
+    basics: "",
+    marketProblem: "",
+    companySolution: "",
+    competition: "",
+    pricing: "",
+    gtm: "",
+    revenue: "",
+    dealTerms: "",
+    pastFinancing: "",
+    source: "Granola",
+    externalSource: `granola:${note.id}`,
+    createdBy: note.owner?.email || "granola",
+    /**
+     * Marks the record as made by the integration rather than by a person.
+     *
+     * Everything automatic in this CRM is labelled, for the same reason: a
+     * company nobody chose to add should be filterable, reviewable, and
+     * removable without having to work out where it came from.
+     */
+    autoCreatedBy: "granola",
+    autoCreatedAt: new Date().toISOString(),
+    stageHistory: [{ stage: "Analyst Call", date: occurredAt }],
+    interactions: [],
+    lastModified: new Date().toISOString(),
+  };
+}
+
+/**
+ * Whether two written forms are the same company name.
+ *
+ * Whole-name equality after stripping everything that is not a letter or
+ * digit, so "Vali Cyber", "ValiCyber" and "vali-cyber" are one company and
+ * "Ramp" and "Rampart" are two. Deliberately not a substring test: this
+ * decides whether to create a second record for a company we already have,
+ * and the failure it has to avoid is treating two companies as one.
+ */
+export const sameCompanyName = (a: string, b: string): boolean => {
+  const ka = nameKeyOf(a);
+  const kb = nameKeyOf(b);
+  return ka.length >= 3 && ka === kb;
+};

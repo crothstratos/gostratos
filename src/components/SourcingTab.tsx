@@ -95,25 +95,39 @@ export function SourcingTab({
    * arriving independently is the signal this tab exists to surface — and then
    * on name, so the order never wobbles between renders.
    */
+  /**
+   * Scoring is kept apart from filtering, and the split is the point.
+   *
+   * These used to be one memo listing crmKeys, so adding a single company —
+   * which changes crmKeys — re-scored every candidate in the list before the
+   * row could disappear. Scoring is the expensive half and depends on nothing
+   * but the candidate, so it now runs only when the candidate list itself
+   * changes. Filtering and sorting run on every keystroke, as they must, but
+   * they are cheap.
+   */
+  const scored = useMemo(
+    () => candidates.map(c => ({ c, fit: scoreSourcingCandidate(c) })),
+    [candidates],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return candidates
+    return scored
       // Moved to the CRM since this list was built. Hidden immediately; the
       // row itself is removed by the next discovery.
-      .filter(c => !crmKeys.has(c.nameKey))
-      .filter(c => (filter === 'active' ? c.status !== 'dismissed' : c.status === 'dismissed'))
-      .filter(c => !q
+      .filter(({ c }) => !crmKeys.has(c.nameKey))
+      .filter(({ c }) => (filter === 'active' ? c.status !== 'dismissed' : c.status === 'dismissed'))
+      .filter(({ c }) => !q
         || c.name.toLowerCase().includes(q)
         || (c.description || '').toLowerCase().includes(q)
         || (c.sourceFirms || []).some(f => f.firmName.toLowerCase().includes(q)))
-      .map(c => ({ c, fit: scoreSourcingCandidate(c) }))
       .sort((a, b) => {
         if (b.fit.score !== a.fit.score) return b.fit.score - a.fit.score;
         const firms = (b.c.sourceFirms?.length || 0) - (a.c.sourceFirms?.length || 0);
         if (firms !== 0) return firms;
         return a.c.name.localeCompare(b.c.name);
       });
-  }, [candidates, filter, query, crmKeys]);
+  }, [scored, filter, query, crmKeys]);
 
   const activeCount = candidates.filter(c => c.status !== 'dismissed').length;
   const dismissedCount = candidates.filter(c => c.status === 'dismissed').length;

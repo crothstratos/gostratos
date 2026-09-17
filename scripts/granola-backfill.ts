@@ -21,6 +21,10 @@
  *   npx tsx scripts/granola-backfill.ts --production          survey production
  *   npx tsx scripts/granola-backfill.ts --production --apply  the real thing
  *
+ *   --create             add companies we do not have yet, the way the
+ *                        webhook now does: one outside company on the call,
+ *                        a new record in Analyst Call. Shown but not written
+ *                        without --apply.
  *   --since=2026-08-01   earliest note to consider (default: everything)
  *   --limit=5            stop after this many matched meetings
  *   --no-ai              log the calls, extract no fields (free)
@@ -33,8 +37,9 @@ import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import {
-  listNotes, getNote, matchNote, meetingKey, externalDomains,
+  listNotes, getNote, matchNote, meetingKey, externalDomains, rootDomain,
   extractFacts, buildInteractionNote, EXTRACTABLE,
+  deriveCompanyName, newCompanyFromNote, sameCompanyName,
 } from "../granola.ts";
 
 const PROJECT_ID = "gen-lang-client-0128987745";
@@ -51,6 +56,7 @@ const val = (n: string) => {
 const APPLY = has("--apply");
 const PRODUCTION = has("--production");
 const NO_AI = has("--no-ai");
+const CREATE = has("--create");
 const SINCE = val("since");
 const LIMIT = Number(val("limit") || 0);
 const DB = PRODUCTION ? PRODUCTION_DB : STAGING_DB;
@@ -75,7 +81,8 @@ const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 (async () => {
   console.log(`\nDatabase : ${DB}${PRODUCTION ? "   *** PRODUCTION ***" : ""}`);
   console.log(`Mode     : ${APPLY ? "APPLY — records will be written" : "DRY RUN — nothing will be written"}`);
-  console.log(`Fields   : ${NO_AI ? "not extracted (--no-ai)" : `extracted with ${model}`}\n`);
+  console.log(`Fields   : ${NO_AI ? "not extracted (--no-ai)" : `extracted with ${model}`}`);
+  console.log(`New      : ${CREATE ? "companies we do not have will be added in Analyst Call" : "unmatched calls are listed only (--create adds them)"}\n`);
 
   const granolaKey = fromEnvYaml("GRANOLA_API_KEY");
   if (!granolaKey) {
@@ -114,7 +121,7 @@ const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   console.log(`${all.length} Granola note(s) found. Working newest first.\n`);
 
   const seenMeetings = new Set<string>();
-  let matched = 0, skipped = 0, filled = 0, failed = 0, logged = 0;
+  let matched = 0, skipped = 0, filled = 0, failed = 0, logged = 0, created = 0;
   const unmatched: string[] = [];
 
   for (const stub of all) {
@@ -129,12 +136,47 @@ const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
       continue;
     }
 
-    const match = matchNote(note, companies);
+    let match = matchNote(note, companies);
+
+    /**
+     * Same rule as the webhook: exactly one outside company on the call is a
+     * company, anything else is a guess. See the comment on that branch in
+     * server.ts for why the count is the safeguard.
+     */
     if (!match) {
-      skipped++;
       const domains = externalDomains(note);
-      if (domains.length) unmatched.push(`${stub.title.slice(0, 44).padEnd(46)} ${domains.join(", ")}`);
-      continue;
+      const domain = domains.length === 1 ? domains[0] : "";
+      const derived = domain ? deriveCompanyName(note, domain) : "";
+      const twins = derived ? companies.filter((c) => sameCompanyName(c.name, derived)) : [];
+
+      if (CREATE && domain && twins.length === 0) {
+        const record = newCompanyFromNote(note, domain);
+        const id = String(record.id);
+        console.log(`  + ${String(record.name).padEnd(22)} new company from ${rootDomain(domain)}`);
+        if (APPLY) {
+          try {
+            await db.collection("companies").doc(id).create(record);
+          } catch (err: any) {
+            if (err?.code !== 6) throw err;
+          }
+        }
+        created++;
+        // Visible to the rest of this run, so a second call with the same
+        // company logs against it instead of creating it again.
+        companies.push({ id, name: String(record.name), website: String(record.website), founderEmail: undefined });
+        match = {
+          companyId: id,
+          companyName: String(record.name),
+          basis: `an attendee from ${rootDomain(domain)} \u2014 this company was added to the CRM from this call`,
+          confidence: "domain",
+        };
+        // A dry run has nothing to write the call onto yet.
+        if (!APPLY) { seenMeetings.add(meetingKey(note)); continue; }
+      } else {
+        skipped++;
+        if (domains.length) unmatched.push(`${stub.title.slice(0, 44).padEnd(46)} ${domains.join(", ")}`);
+        continue;
+      }
     }
 
     // One call, not one note per colleague who recorded it.
@@ -243,12 +285,15 @@ const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   console.log(`  skipped (internal, dupes, no match) ${String(skipped).padStart(5)}`);
   console.log(`  interactions ${APPLY ? "written" : "to write"}   ${String(APPLY ? logged : matched).padStart(5)}`);
   console.log(`  fields ${APPLY ? "filled" : "fillable"}          ${String(filled).padStart(5)}`);
+  if (CREATE) console.log(`  companies ${APPLY ? "added" : "to add"}         ${String(created).padStart(5)}`);
   if (failed) console.log(`  notes that could not be read ${String(failed).padStart(5)}`);
 
   if (unmatched.length) {
     console.log("\nMet, but not in the CRM");
     console.log("-----------------------");
-    console.log("  (these are companies you have spoken to and are not tracking)");
+    console.log(CREATE
+      ? "  (two or more outside companies on the call, so not added automatically)"
+      : "  (these are companies you have spoken to and are not tracking; --create adds them)");
     for (const u of unmatched.slice(0, 25)) console.log(`  ${u}`);
     if (unmatched.length > 25) console.log(`  ... and ${unmatched.length - 25} more`);
   }
