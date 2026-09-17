@@ -5,13 +5,28 @@ coverage/
 .DS_Store
 *.log
 
-# Local secrets — never commit
+# Local secrets - never commit
+#
+# The patterns are deliberately wider than the filenames in use. `env.yaml`
+# alone does NOT match `env.yaml.bak-20260914-143207`, and five backups
+# written by a helper script were committed to a public repository with a
+# live API key in them because of exactly that gap. Anything whose name
+# starts with a secret file's name is ignored now, backups included.
 .env
+.env.*
 .env.local
 .env.*.local
 env.yaml
+env.yaml.*
+!env.yaml.example
+*.bak
+*.bak-*
+*.before-backup
 
-# Committed config (public-by-design client values)
+# Committed config (public-by-design client values).
+# These hold Firebase WEB keys, which ship in the browser bundle and are meant
+# to be public; the boundary for those is firestore.rules, not secrecy. They
+# are re-included after the wildcards above.
 !.env.example
 !.env.production
 !env.yaml.example

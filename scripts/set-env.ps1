@@ -101,12 +101,20 @@ if ($wanted.Contains("GRANOLA_WEBHOOK_SECRET") -and -not $wanted["GRANOLA_WEBHOO
     exit 1
 }
 
-# --- back up before touching it
-$stamp  = Get-Date -Format "yyyyMMdd-HHmmss"
-$backup = "$envPath.bak-$stamp"
+# --- back up before touching it, OUTSIDE the repository
+#
+# The backup holds every key env.yaml holds. Writing it beside env.yaml put it
+# inside the working tree, where .gitignore's `env.yaml` pattern did not match
+# `env.yaml.bak-<stamp>`, so five of them were committed and pushed to a public
+# repository with a live API key inside. Backups go to the user's LOCALAPPDATA
+# now: still there when a run goes wrong, never anywhere git can see.
+$stamp     = Get-Date -Format "yyyyMMdd-HHmmss"
+$backupDir = Join-Path $env:LOCALAPPDATA "StratosCRM\env-backups"
+if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
+$backup = Join-Path $backupDir "env.yaml.bak-$stamp"
 Copy-Item -Path $envPath -Destination $backup -Force
 Write-Host ""
-Write-Host "  Backed up to $(Split-Path -Leaf $backup)" -ForegroundColor DarkGray
+Write-Host "  Backed up to $backup" -ForegroundColor DarkGray
 
 # --- set or update each key
 $result  = New-Object System.Collections.Generic.List[string]
